@@ -588,10 +588,9 @@ public class SlingClient extends AbstractSlingClient {
      *
      * @param jsonNode {@link JsonNode} object of the repository node
      * @return UUID as String or null if jsonNode is null or if the UUID was not found
-     * @throws ClientException if something fails during request/response cycle
      */
     // TODO make this method static
-    public String getUUId(JsonNode jsonNode) throws ClientException {
+    public String getUUId(JsonNode jsonNode) {
         if (jsonNode == null) {
             return null;
         }
