@@ -39,11 +39,9 @@ public class HttpServerRule extends ExternalResource {
 
     protected ServerBootstrap serverBootstrap;
 
-    public static enum ProtocolScheme {
+    public enum ProtocolScheme {
         http,
-        https;
-        private ProtocolScheme() {
-        }
+        https
     }
 
     protected final ProtocolScheme protocolScheme;

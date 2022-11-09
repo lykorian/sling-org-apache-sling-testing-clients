@@ -18,7 +18,15 @@
  ******************************************************************************/
 package org.apache.sling.testing.clients.indexing;
 
-import org.apache.http.*;
+import java.io.IOException;
+import java.nio.charset.Charset;
+import java.util.List;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.apache.http.HttpRequest;
+import org.apache.http.HttpResponse;
+import org.apache.http.NameValuePair;
 import org.apache.http.client.utils.URLEncodedUtils;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.message.BasicHttpEntityEnclosingRequest;
@@ -27,22 +35,13 @@ import org.apache.http.protocol.HttpRequestHandler;
 import org.apache.sling.testing.clients.ClientException;
 import org.apache.sling.testing.clients.HttpServerRule;
 import org.apache.sling.testing.clients.query.servlet.QueryServlet;
+import org.apache.sling.testing.util.HttpRequestUtils;
 import org.hamcrest.CoreMatchers;
 import org.junit.Assert;
 import org.junit.ClassRule;
 import org.junit.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.io.IOException;
-import java.nio.charset.Charset;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicInteger;
 
 public class IndexingClientTest {
-    private static final Logger LOG = LoggerFactory.getLogger(IndexingClientTest.class);
 
     private static final String EXPLAIN_RESPONSE = "{\"plan\": \"random plan with testIndexingLane-async and testIndexingLane-fulltext-async\",\"time\": 1}";
     private static final String QUERY_RESPONSE = "{\"total\": 1234,\"time\": 1}";
@@ -53,97 +52,64 @@ public class IndexingClientTest {
 
     @ClassRule
     public static HttpServerRule httpServer = new HttpServerRule() {
-        HttpRequestHandler okHandler =  new HttpRequestHandler() {
-            @Override
-            public void handle(HttpRequest request, HttpResponse response, HttpContext context)
-                    throws HttpException, IOException {
-                response.setStatusCode(200);
-                response.setEntity(new StringEntity("Everything's fine"));
-            }
+        private final HttpRequestHandler okHandler = (request, response, context) -> {
+            response.setStatusCode(200);
+            response.setEntity(new StringEntity("Everything's fine"));
         };
 
-        HttpRequestHandler createdHandler =  new HttpRequestHandler() {
-            @Override
-            public void handle(HttpRequest request, HttpResponse response, HttpContext context)
-                    throws HttpException, IOException {
-                response.setStatusCode(201);
-                response.setEntity(new StringEntity("Created"));
-            }
+        private final HttpRequestHandler createdHandler = (request, response, context) -> {
+            response.setStatusCode(201);
+            response.setEntity(new StringEntity("Created"));
         };
 
         @Override
-        protected void registerHandlers() throws IOException {
+        protected void registerHandlers() {
             // Normal query request
-            serverBootstrap.registerHandler(QueryServlet.SERVLET_PATH, new HttpRequestHandler() {
-                @Override
-                public void handle(HttpRequest request, HttpResponse response, HttpContext context)
-                        throws HttpException, IOException {
-                    List<NameValuePair> parameters = URLEncodedUtils.parse(
-                            request.getRequestLine().getUri(), Charset.defaultCharset());
+            serverBootstrap.registerHandler(QueryServlet.SERVLET_PATH, (request, response, context) -> {
+                List<NameValuePair> parameters = URLEncodedUtils.parse(
+                        request.getRequestLine().getUri(), Charset.defaultCharset());
 
-                    for (NameValuePair parameter : parameters) {
-                        if (parameter.getName().equals("explain") && !parameter.getValue().equals("false")) {
-                            response.setEntity(new StringEntity(EXPLAIN_RESPONSE));
-                            return;
-                        }
+                for (NameValuePair parameter : parameters) {
+                    if (parameter.getName().equals("explain") && !parameter.getValue().equals("false")) {
+                        response.setEntity(new StringEntity(EXPLAIN_RESPONSE));
+                        return;
                     }
-
-                    response.setEntity(new StringEntity(QUERY_RESPONSE));
                 }
+
+                response.setEntity(new StringEntity(QUERY_RESPONSE));
             });
 
             // Install servlet
-            serverBootstrap.registerHandler("/system/console/bundles", new HttpRequestHandler() {
-                @Override
-                public void handle(HttpRequest request, HttpResponse response, HttpContext context)
-                        throws HttpException, IOException {
-                    // is install (post) or checking status (get)
-                    if (request instanceof BasicHttpEntityEnclosingRequest) {
-                        response.setStatusCode(302);
-                    } else {
-                        response.setStatusCode(200);
-                    }
-                }
-            });
-
-            // Check bundle status
-            serverBootstrap.registerHandler("BUNDLE_PATH" + ".json", new HttpRequestHandler() {
-                @Override
-                public void handle(HttpRequest request, HttpResponse response, HttpContext context)
-                        throws HttpException, IOException {
-                    response.setEntity(new StringEntity("JSON_BUNDLE"));
-                }
-            });
-
-            // Uninstall bundle
-            serverBootstrap.registerHandler("BUNDLE_PATH", new HttpRequestHandler() {
-                @Override
-                public void handle(HttpRequest request, HttpResponse response, HttpContext context)
-                        throws HttpException, IOException {
+            serverBootstrap.registerHandler("/system/console/bundles", (request, response, context) -> {
+                // is install (post) or checking status (get)
+                if (request instanceof BasicHttpEntityEnclosingRequest) {
+                    response.setStatusCode(302);
+                } else {
                     response.setStatusCode(200);
                 }
             });
 
+            // Check bundle status
+            serverBootstrap.registerHandler("BUNDLE_PATH" + ".json",
+                (request, response, context) -> response.setEntity(new StringEntity("JSON_BUNDLE")));
+
+            // Uninstall bundle
+            serverBootstrap.registerHandler("BUNDLE_PATH", (request, response, context) -> response.setStatusCode(200));
+
             // Uninstall bundle
             serverBootstrap.registerHandler(
                     "/system/console/configMgr/org.apache.jackrabbit.oak.plugins.index.AsyncIndexerService",
-                    new HttpRequestHandler() {
-                        @Override
-                        public void handle(HttpRequest request, HttpResponse response, HttpContext context)
-                                throws HttpException, IOException {
-                            NUM_INDEXING_LANE_CONSOLE_CALLS.incrementAndGet();
-                            response.setStatusCode(200);
-                            response.setEntity(new StringEntity("{\"properties\":{" +
-                                    "\"asyncConfigs\":{\"values\":[\"async:5\",\"fulltext-async:5\"]}}}"));
-                        }
-                    }
+                (request, response, context) -> {
+                    NUM_INDEXING_LANE_CONSOLE_CALLS.incrementAndGet();
+                    response.setStatusCode(200);
+                    response.setEntity(new StringEntity("{\"properties\":{" +
+                            "\"asyncConfigs\":{\"values\":[\"async:5\",\"fulltext-async:5\"]}}}"));
+                }
             );
 
-            serverBootstrap.registerHandler("/tmp/testing/waitForAsyncIndexing/content/*", new HttpRequestHandler() {
-                @Override
-                public void handle(HttpRequest request, HttpResponse response, HttpContext context)
-                        throws HttpException, IOException {
-                    List<NameValuePair> params = extractParameters(request);
+            serverBootstrap.registerHandler("/tmp/testing/waitForAsyncIndexing/content/*",
+                (request, response, context) -> {
+                    List<NameValuePair> params = HttpRequestUtils.getParameters(request);
 
                     for (NameValuePair param : params) {
                         if (param.getName().equals(":operation") && (param.getValue().equals("delete"))) {
@@ -154,14 +120,11 @@ public class IndexingClientTest {
 
                     response.setStatusCode(201);
                     response.setEntity(new StringEntity("Created!"));
-                }
-            });
+                });
 
-            serverBootstrap.registerHandler("/tmp/testing/waitForAsyncIndexing/oak:index/*", new HttpRequestHandler() {
-                @Override
-                public void handle(HttpRequest request, HttpResponse response, HttpContext context)
-                        throws HttpException, IOException {
-                    List<NameValuePair> params = extractParameters(request);
+            serverBootstrap.registerHandler("/tmp/testing/waitForAsyncIndexing/oak:index/*",
+                (request, response, context) -> {
+                    List<NameValuePair> params = HttpRequestUtils.getParameters(request);
 
                     for (NameValuePair param : params) {
                         if (param.getName().equals(":operation") && (param.getValue().equals("delete"))) {
@@ -172,8 +135,7 @@ public class IndexingClientTest {
 
                     response.setStatusCode(200);
                     response.setEntity(new StringEntity("Created!"));
-                }
-            });
+                });
 
             // unimportant requests
             serverBootstrap.registerHandler("/tmp.json", okHandler);
@@ -228,18 +190,5 @@ public class IndexingClientTest {
 
         Assert.assertEquals("Must not get indexing lanes from /system/console",
                 0, NUM_INDEXING_LANE_CONSOLE_CALLS.get());
-    }
-
-    private static List<NameValuePair> extractParameters(HttpRequest request) {
-        if (request instanceof HttpEntityEnclosingRequest) {
-            HttpEntity entity = ((HttpEntityEnclosingRequest) request).getEntity();
-            try {
-                return URLEncodedUtils.parse(entity);
-            } catch (IOException e) {
-                LOG.error("Failed to parse entity", e);
-            }
-        }
-
-        return new ArrayList<>();
     }
 }

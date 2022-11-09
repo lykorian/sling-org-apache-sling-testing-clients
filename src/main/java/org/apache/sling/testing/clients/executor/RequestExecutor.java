@@ -2,10 +2,12 @@ package org.apache.sling.testing.clients.executor;
 
 import java.net.URI;
 import java.nio.charset.Charset;
+import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.function.Function;
 import java.util.function.Predicate;
 
 import org.apache.http.Header;
@@ -14,19 +16,16 @@ import org.apache.http.NameValuePair;
 import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.HttpUriRequest;
 import org.apache.http.client.methods.RequestBuilder;
-import org.apache.http.entity.ContentType;
-import org.apache.http.entity.mime.MultipartEntityBuilder;
-import org.apache.http.entity.mime.content.StringBody;
 import org.apache.http.message.BasicNameValuePair;
 import org.apache.sling.testing.clients.ClientException;
 import org.apache.sling.testing.clients.SlingClient;
 import org.apache.sling.testing.clients.SlingHttpResponse;
+import org.apache.sling.testing.clients.exceptions.TestingIOException;
+import org.apache.sling.testing.clients.exceptions.TestingValidationException;
 import org.apache.sling.testing.clients.executor.builder.ConditionFactoryBuilder;
-import org.apache.sling.testing.clients.executor.config.RetryConfig;
-import org.apache.sling.testing.clients.executor.config.VerificationConfig;
 import org.apache.sling.testing.clients.executor.predicates.SlingHttpResponseBodyContainsPredicate;
 import org.apache.sling.testing.clients.executor.predicates.SlingHttpResponseStatusCodePredicate;
-import org.apache.sling.testing.clients.executor.resiliency.ResiliencyHelper;
+import org.apache.sling.testing.clients.executor.resiliency.RetryHelper;
 import org.apache.sling.testing.clients.executor.resiliency.VerificationHelper;
 import org.apache.sling.testing.clients.executor.verifier.JsonNodeVerifier;
 import org.apache.sling.testing.clients.util.FormEntityBuilder;
@@ -40,7 +39,7 @@ import org.slf4j.LoggerFactory;
 import com.fasterxml.jackson.databind.JsonNode;
 
 /**
- * Builder for HTTP request executions.
+ * Builder for retryable HTTP request executions.
  * <p>
  * Note: all checked exceptions are caught and rethrown as runtime exceptions.  These errors should be handled by the
  * JUnit runner and result in test failure.
@@ -59,24 +58,46 @@ public final class RequestExecutor {
     /** HTTP request builder to encapsulate HTTP client request properties. */
     private final RequestBuilder delegate;
 
+    /** Value to String conversion function for condition logging. */
+    private static final Function<Object, String> VALUE_TO_STRING = value -> {
+        final String valueAsString;
+
+        if (value instanceof SlingHttpResponse) {
+            valueAsString = ((SlingHttpResponse) value).getStatusLine().toString();
+        } else {
+            valueAsString = value.toString();
+        }
+
+        return valueAsString;
+    };
+
+    /** Condition factory for request retries. */
+    private ConditionFactory retryConditionFactory = ConditionFactoryBuilder.getInstance()
+        .withValueToStringFunction(VALUE_TO_STRING)
+        .build();
+
+    /** Condition factory for request verification. */
+    private ConditionFactory verificationConditionFactory = ConditionFactoryBuilder.getInstance()
+        .withDelay(Duration.ofSeconds(10))
+        .build();
+
     /** Resiliency helper. */
-    private ResiliencyHelper resiliencyHelper = new ResiliencyHelper(RetryConfig.DEFAULT);
+    private RetryHelper retryHelper = new RetryHelper(retryConditionFactory);
 
     /** Mutation request helper. */
-    private VerificationHelper verificationHelper = new VerificationHelper(VerificationConfig.DEFAULT);
-
-    /** Alias for condition logging. */
-    private String alias;
+    private VerificationHelper verificationHelper = new VerificationHelper(verificationConditionFactory);
 
     /** Expected HTTP status. */
     private int[] expectedStatus = new int[0];
 
+    /** Expected HTTP response body content. */
     private String expectedContent;
 
+    /** Expected HTTP response condition. */
     private Predicate<SlingHttpResponse> expectedCondition;
 
-    /** Enable retry for requests. */
-    private boolean retry;
+    /** Disable request retries. */
+    private boolean disableRetry;
 
     /** Optional descriptive failure message. */
     private String failureMessage;
@@ -300,22 +321,6 @@ public final class RequestExecutor {
     }
 
     /**
-     * Set a multipart request entity with the provided parameters.
-     *
-     * @param parameters parameter map
-     * @return this
-     */
-    public RequestExecutor withMultipartEntity(@NotNull final Map<String, String> parameters) {
-        final MultipartEntityBuilder multiPartEntity = MultipartEntityBuilder.create().setLaxMode();
-
-        for (final Map.Entry<String, String> entry : parameters.entrySet()) {
-            multiPartEntity.addPart(entry.getKey(), new StringBody(entry.getValue(), ContentType.MULTIPART_FORM_DATA));
-        }
-
-        return withEntity(multiPartEntity.build());
-    }
-
-    /**
      * Override the default HTTP client request config.
      *
      * @param config HTTP client request config
@@ -328,40 +333,40 @@ public final class RequestExecutor {
     }
 
     /**
-     * Enable retry of failed requests.  Retries are disabled by default.
+     * Disable request retries.
      *
      * @return this
      */
-    public RequestExecutor withRetry() {
-        retry = true;
+    public RequestExecutor disableRetry() {
+        this.disableRetry = true;
 
         return this;
     }
 
     /**
-     * Override the default retry config.
+     * Override the default retry condition factory.
      *
-     * @param retryConfig retry config
+     * @param retryConditionFactory retry condition factory
      * @return this
      */
-    public RequestExecutor withRetryConfig(@NotNull final RetryConfig retryConfig) {
-        final ConditionFactory conditionFactory = ConditionFactoryBuilder.getInstance(retryConfig)
-            .withAlias(alias)
-            .build();
+    public RequestExecutor withRetryConditionFactory(@NotNull final ConditionFactory retryConditionFactory) {
+        this.retryConditionFactory = retryConditionFactory;
 
-        resiliencyHelper = new ResiliencyHelper(conditionFactory);
+        retryHelper = new RetryHelper(retryConditionFactory);
 
         return this;
     }
 
     /**
-     * Override the default verification config.
+     * Override the default verification condition factory.
      *
-     * @param verificationConfig verification config
+     * @param verificationConditionFactory verification condition factory
      * @return this
      */
-    public RequestExecutor withVerificationConfig(@NotNull final VerificationConfig verificationConfig) {
-        verificationHelper = new VerificationHelper(verificationConfig);
+    public RequestExecutor withVerificationConditionFactory(@NotNull final ConditionFactory verificationConditionFactory) {
+        this.verificationConditionFactory = verificationConditionFactory;
+
+        verificationHelper = new VerificationHelper(verificationConditionFactory);
 
         return this;
     }
@@ -373,7 +378,8 @@ public final class RequestExecutor {
      * @return this
      */
     public RequestExecutor withAlias(@NotNull final String alias) {
-        this.alias = alias;
+        withRetryConditionFactory(retryConditionFactory.alias(alias));
+        withVerificationConditionFactory(verificationConditionFactory.alias(alias));
 
         return this;
     }
@@ -392,29 +398,26 @@ public final class RequestExecutor {
 
     /**
      * Execute a request and retry until the expected HTTP response status code is returned.  Requests are retried using
-     * the configured {@link ResiliencyHelper} for GET, HEAD, OPTIONS, and TRACE requests.
+     * the configured {@link RetryHelper} for GET, HEAD, OPTIONS, and TRACE requests.
      *
      * @return Sling HTTP response
      */
-    public SlingHttpResponse execute() {
+    public SlingHttpResponse execute() throws TestingValidationException {
         final HttpUriRequest request = getRequest();
-        final SlingHttpResponse response;
+        SlingHttpResponse response = null;
 
         try {
-            if (retry) {
-                response = resiliencyHelper.retryUntilCondition(() -> doRequest(request), getPredicate());
-            } else {
+            if (disableRetry) {
                 response = doRequest(request);
 
                 if (!getPredicate().test(response)) {
-                    throw new RuntimeException("HTTP response body does not meet expected conditions: "
-                        + expectedContent);
+                    throw new TestingValidationException("HTTP response body does not meet expected condition");
                 }
+            } else {
+                response = retryHelper.retryUntilCondition(() -> doRequest(request), getPredicate());
             }
         } catch (ConditionTimeoutException | ClientException e) {
-            logFailureMessage(e);
-
-            throw new RuntimeException(e);
+            logAndThrowException(e);
         }
 
         return response;
@@ -425,8 +428,12 @@ public final class RequestExecutor {
      *
      * @param verifier verification task
      */
-    public void executeAndVerify(@NotNull final Callable<Boolean> verifier) {
-        verificationHelper.requestAndVerify(this::execute, verifier);
+    public void executeAndVerify(@NotNull final Callable<Boolean> verifier) throws TestingValidationException {
+        try {
+            verificationHelper.requestAndVerify(this::execute, verifier);
+        } catch (TestingValidationException e) {
+            logAndThrowException(e);
+        }
     }
 
     /**
@@ -437,15 +444,13 @@ public final class RequestExecutor {
      * @param verifier verification task
      */
     public void mayExecuteAndVerify(@NotNull final Callable<Boolean> precondition,
-        @NotNull final Callable<Boolean> verifier) {
+        @NotNull final Callable<Boolean> verifier) throws TestingValidationException {
         try {
             if (precondition.call()) {
                 executeAndVerify(verifier);
             }
         } catch (Exception e) {
-            logFailureMessage(e);
-
-            throw new RuntimeException("Failed to call request.", e);
+            logAndThrowException(e);
         }
     }
 
@@ -457,17 +462,22 @@ public final class RequestExecutor {
      * path.
      *
      * @return JSON node
-     * @throws ClientException if the response body cannot be parsed as a JSON node
+     * @throws TestingIOException if the response body cannot be parsed as a JSON node
+     * @throws TestingValidationException if an error occurs during request execution
      */
-    public JsonNode getJsonNode() throws ClientException {
+    public JsonNode getJsonNode() throws TestingIOException, TestingValidationException {
         return getAsJsonNode(execute());
     }
 
     /**
      * Execute a request for a path returning a JSON response, retrying the request until the <code>NodeVerifier</code>
      * returns <code>true</code>.
+     *
+     * @throws TestingIOException if the response body cannot be parsed as a JSON node
+     * @throws TestingValidationException if an error occurs during request execution
      */
-    public JsonNode getJsonNode(final JsonNodeVerifier nodeVerifier) throws ClientException {
+    public JsonNode getJsonNode(final JsonNodeVerifier nodeVerifier)
+        throws TestingIOException, TestingValidationException {
         return withExpectedCondition(response -> {
             try {
                 return nodeVerifier.verify(getAsJsonNode(response));
@@ -479,36 +489,36 @@ public final class RequestExecutor {
 
     /**
      * Execute a request for a JSON node with the default depth and retry until the response matches the expected HTTP
-     * status code and the node exists. Requests are retried using the configured {@link ResiliencyHelper} for GET,
-     * HEAD, OPTIONS, and TRACE requests.
+     * status code and the node exists. Requests are retried using the configured {@link RetryHelper} for GET, HEAD,
+     * OPTIONS, and TRACE requests.
      *
      * @return JSON node
+     * @throws TestingValidationException if an error occurs during request execution
      */
-    public JsonNode getAsJsonNode() {
+    public JsonNode getAsJsonNode() throws TestingValidationException {
         return getAsJsonNode(DEFAULT_JSON_DEPTH);
     }
 
     /**
      * Execute a request for a JSON node with the given depth and retry until the response matches the expected HTTP
-     * status code and the node exists. Requests are retried using the configured {@link ResiliencyHelper} for GET,
-     * HEAD, OPTIONS, and TRACE requests.
+     * status code and the node exists. Requests are retried using the configured {@link RetryHelper} for GET, HEAD,
+     * OPTIONS, and TRACE requests.
      *
      * @param depth JSON node depth
      * @return JSON node
+     * @throws TestingValidationException if an error occurs during request execution
      */
-    public JsonNode getAsJsonNode(final int depth) {
-        final JsonNode jsonNode;
+    public JsonNode getAsJsonNode(final int depth) throws TestingValidationException {
+        JsonNode jsonNode = null;
 
         try {
-            if (retry) {
-                jsonNode = resiliencyHelper.retryUntilExists(() -> doGetJson(depth));
-            } else {
+            if (disableRetry) {
                 jsonNode = doGetJson(depth);
+            } else {
+                jsonNode = retryHelper.retryUntilExists(() -> doGetJson(depth));
             }
         } catch (ConditionTimeoutException | ClientException e) {
-            logFailureMessage(e);
-
-            throw new RuntimeException(e);
+            logAndThrowException(e);
         }
 
         return jsonNode;
@@ -516,40 +526,41 @@ public final class RequestExecutor {
 
     /**
      * Execute a request for a JSON node with the default depth and retry until the response matches the expected HTTP
-     * status code and the JSON node state is verified. Requests are retried using the configured
-     * {@link ResiliencyHelper} for GET, HEAD, OPTIONS, and TRACE requests.
+     * status code and the JSON node state is verified. Requests are retried using the configured {@link RetryHelper}
+     * for GET, HEAD, OPTIONS, and TRACE requests.
      *
      * @param nodeVerifier JSON node verifier
      * @return true if JSON node state is verified
+     * @throws TestingValidationException if an error occurs during request execution
      */
-    public boolean verifyJsonNode(@NotNull final JsonNodeVerifier nodeVerifier) {
+    public boolean verifyJsonNode(@NotNull final JsonNodeVerifier nodeVerifier) throws TestingValidationException {
         return verifyJsonNode(DEFAULT_JSON_DEPTH, nodeVerifier);
     }
 
     /**
      * Execute a request for a JSON node with the given depth and retry until the response matches the expected HTTP
-     * status code and the JSON node state is verified. Requests are retried using the configured
-     * {@link ResiliencyHelper} for GET, HEAD, OPTIONS, and TRACE requests.
+     * status code and the JSON node state is verified. Requests are retried using the configured {@link RetryHelper}
+     * for GET, HEAD, OPTIONS, and TRACE requests.
      *
      * @param depth JSON node depth
      * @param nodeVerifier JSON node verifier
      * @return true if JSON node state is verified
+     * @throws TestingValidationException if an error occurs during request execution
      */
-    public boolean verifyJsonNode(final int depth, @NotNull final JsonNodeVerifier nodeVerifier) {
-        final boolean verified;
+    public boolean verifyJsonNode(final int depth, @NotNull final JsonNodeVerifier nodeVerifier)
+        throws TestingValidationException {
+        boolean verified = false;
 
         try {
-            if (retry) {
+            if (disableRetry) {
+                verified = verifyJsonNode(doGetJson(depth), nodeVerifier);
+            } else {
                 final Callable<JsonNode> request = () -> doGetJson(depth);
 
-                verified = resiliencyHelper.retryUntilTrue(() -> verifyJsonNode(request.call(), nodeVerifier));
-            } else {
-                verified = verifyJsonNode(doGetJson(depth), nodeVerifier);
+                verified = retryHelper.retryUntilTrue(() -> verifyJsonNode(request.call(), nodeVerifier));
             }
         } catch (ConditionTimeoutException | ClientException e) {
-            logFailureMessage(e);
-
-            throw new RuntimeException(e);
+            logAndThrowException(e);
         }
 
         return verified;
@@ -577,14 +588,16 @@ public final class RequestExecutor {
     }
 
     /**
-     * Log optional failure message.
+     * Log optional failure message and rethrow exception.
      *
-     * @param exception exception to be logged and propagated
+     * @param exception exception to be logged and rethrown
      */
-    private void logFailureMessage(final Exception exception) {
+    private void logAndThrowException(final Exception exception) throws TestingValidationException {
         if (failureMessage != null) {
             LOG.error(failureMessage, exception);
         }
+
+        throw new TestingValidationException("error executing HTTP request", exception);
     }
 
     private String getRequestPath() {
@@ -636,7 +649,7 @@ public final class RequestExecutor {
         return verified;
     }
 
-    private JsonNode getAsJsonNode(final SlingHttpResponse response) throws ClientException {
+    private JsonNode getAsJsonNode(final SlingHttpResponse response) throws TestingIOException {
         return JsonUtils.getJsonNodeFromString(response.getContent());
     }
 }

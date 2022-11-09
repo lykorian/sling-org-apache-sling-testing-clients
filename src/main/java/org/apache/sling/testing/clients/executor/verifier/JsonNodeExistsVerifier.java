@@ -1,5 +1,7 @@
 package org.apache.sling.testing.clients.executor.verifier;
 
+import org.jetbrains.annotations.NotNull;
+
 import com.fasterxml.jackson.databind.JsonNode;
 
 /**
@@ -17,7 +19,7 @@ public final class JsonNodeExistsVerifier implements JsonNodeVerifier {
     }
 
     @Override
-    public boolean verify(final JsonNode rootJsonNode) {
+    public boolean verify(@NotNull final JsonNode rootJsonNode) {
         return rootJsonNode.path(nodeToVerify).isMissingNode() != shouldExist;
     }
 }

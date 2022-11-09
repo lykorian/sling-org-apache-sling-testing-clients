@@ -1,16 +1,15 @@
 package org.apache.sling.testing.clients.executor.builder;
 
+import java.io.IOException;
 import java.time.Duration;
-import java.util.Optional;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.Arrays;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
-import org.apache.sling.testing.clients.executor.config.RetryConfig;
+import org.apache.sling.testing.clients.ClientException;
+import org.apache.sling.testing.clients.executor.listener.LoggingConditionEvaluationListener;
 import org.awaitility.Awaitility;
-import org.awaitility.core.ConditionEvaluationListener;
 import org.awaitility.core.ConditionFactory;
-import org.awaitility.core.EvaluatedCondition;
 import org.awaitility.pollinterval.IterativePollInterval;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,7 +20,7 @@ import org.slf4j.LoggerFactory;
 public final class ConditionFactoryBuilder {
 
     /**
-     * Get the default builder instance.
+     * Get a builder instance with the default configuration.
      *
      * @return builder
      */
@@ -29,48 +28,39 @@ public final class ConditionFactoryBuilder {
         return new ConditionFactoryBuilder();
     }
 
-    /**
-     * Get a builder instance preconfigured using the provided <code>RetryConfig</code>.
-     *
-     * @param retryConfig retry configuration
-     * @return builder
-     */
-    public static ConditionFactoryBuilder getInstance(final RetryConfig retryConfig) {
-        return new ConditionFactoryBuilder(retryConfig);
-    }
-
     private static final Logger LOG = LoggerFactory.getLogger(ConditionFactoryBuilder.class);
 
+    /** Default initial duration for retries. */
     private static final Duration DEFAULT_INITIAL = Duration.ofSeconds(1);
 
+    /** Default multiplier for retries. */
     private static final long DEFAULT_MULTIPLIER = 2;
 
     private static final Duration DEFAULT_TIMEOUT = Duration.ofMinutes(1);
 
+    /** Default exceptions to retry on. */
+    private static final Class<?>[] DEFAULT_RETRY_ON_EXCEPTIONS = {ClientException.class, IOException.class};
+
     private String alias;
 
-    private Duration delay = Duration.ZERO;
+    private Duration delay;
 
-    private Duration initial = DEFAULT_INITIAL;
+    private Duration initial;
 
-    private long multiplier = DEFAULT_MULTIPLIER;
+    private long multiplier;
 
-    private Duration timeout = DEFAULT_TIMEOUT;
+    private Duration timeout;
+
+    private Class<?>[] retryOn;
 
     private Function<Object, String> valueToString;
 
-    private Class<?>[] retryOn = new Class[0];
-
     private ConditionFactoryBuilder() {
-
-    }
-
-    private ConditionFactoryBuilder(final RetryConfig retryConfig) {
-        delay = retryConfig.getDelay();
-        initial = retryConfig.getInitial();
-        multiplier = retryConfig.getMultiplier();
-        timeout = retryConfig.getTimeout();
-        retryOn = retryConfig.getRetryOnExceptions();
+        delay = Duration.ZERO;
+        initial = DEFAULT_INITIAL;
+        multiplier = DEFAULT_MULTIPLIER;
+        timeout = DEFAULT_TIMEOUT;
+        retryOn = DEFAULT_RETRY_ON_EXCEPTIONS;
     }
 
     /**
@@ -153,7 +143,7 @@ public final class ConditionFactoryBuilder {
      * @param retryOn exception classes to retry on
      * @return this
      */
-    public ConditionFactoryBuilder withRetryOn(final Class<?>[] retryOn) {
+    public ConditionFactoryBuilder withRetryOn(final Class<?>... retryOn) {
         this.retryOn = retryOn;
 
         return this;
@@ -165,51 +155,26 @@ public final class ConditionFactoryBuilder {
      * @return <code>ConditionFactory</code> instance
      */
     public ConditionFactory build() {
-        final AtomicInteger count = new AtomicInteger(0);
-
         return Awaitility.await(alias)
             .atMost(timeout)
-            .conditionEvaluationListener(getConditionEvaluationLogger(count.incrementAndGet()))
+            .conditionEvaluationListener(new LoggingConditionEvaluationListener(valueToString))
             .pollDelay(delay)
             .pollInterval(IterativePollInterval.iterative(duration -> duration.multipliedBy(multiplier), initial))
             .ignoreExceptionsMatching(getExceptionPredicate());
     }
 
     private Predicate<? super Throwable> getExceptionPredicate() {
-        return ex -> {
-            for (Class<?> ro : retryOn) {
-                if (ex.getClass().isAssignableFrom(ro)) {
-                    LOG.info("handling retryable exception: {}", ex.getClass().getName());
-                    return true;
-                }
-            }
-            LOG.error("encountered non-retryable exception", ex);
-            return false;
-        };
-    }
+        return exception -> {
+            final boolean retryable = Arrays.stream(retryOn).anyMatch(retryOnException -> retryOnException
+                .isAssignableFrom(exception.getClass()));
 
-    private ConditionEvaluationListener<?> getConditionEvaluationLogger(final int count) {
-        return condition -> {
-            if (condition.isSatisfied()) {
-                LOG.info("{} satisfied after {} attempt(s) in {}ms, value: {}", getConditionLog(condition),
-                    count, condition.getElapsedTimeInMS(), getStringValue(condition.getValue(),
-                        valueToString));
+            if (retryable) {
+                LOG.info("handling retryable exception: {}", exception.getClass().getName());
             } else {
-                LOG.info("{} not satisfied after {} attempt(s), poll interval: {}ms, elapsed time: {}ms, " +
-                        "remaining time: {}ms, current value: {}", getConditionLog(condition), count,
-                    condition.getPollInterval().toMillis(), condition.getElapsedTimeInMS(),
-                    condition.getRemainingTimeInMS(), getStringValue(condition.getValue(), valueToString));
+                LOG.error("encountered non-retryable exception", exception);
             }
+
+            return retryable;
         };
-    }
-
-    private String getConditionLog(final EvaluatedCondition<?> condition) {
-        return condition.hasAlias() ? "condition [" + condition.getAlias() + "]" : "condition";
-    }
-
-    private String getStringValue(final Object conditionValue, final Function<Object, String> valueToString) {
-        return Optional.ofNullable(valueToString)
-            .map(function -> function.apply(conditionValue))
-            .orElse(conditionValue.toString());
     }
 }

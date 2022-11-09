@@ -1,5 +1,7 @@
 package org.apache.sling.testing.clients.executor.verifier;
 
+import org.jetbrains.annotations.NotNull;
+
 import com.fasterxml.jackson.databind.JsonNode;
 
 /**
@@ -13,5 +15,5 @@ public interface JsonNodeVerifier {
      * @param rootNode root JSON node to verify
      * @return <code>true</code> if able to verify, <code>false</code> otherwise
      */
-    boolean verify(JsonNode rootNode);
+    boolean verify(@NotNull JsonNode rootNode);
 }

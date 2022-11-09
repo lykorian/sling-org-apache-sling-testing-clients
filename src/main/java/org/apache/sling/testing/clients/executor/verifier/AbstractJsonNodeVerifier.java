@@ -1,5 +1,6 @@
 package org.apache.sling.testing.clients.executor.verifier;
 
+import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -30,15 +31,15 @@ public abstract class AbstractJsonNodeVerifier implements JsonNodeVerifier {
      * @return true if JSON node state is verified
      */
     @Override
-    public final boolean verify(final JsonNode rootJsonNode) {
+    public final boolean verify(@NotNull final JsonNode rootJsonNode) {
         final boolean result;
 
         if (jsonNodeToVerify == null) {
-            LOG.debug("verifying root JSON node: {}", rootJsonNode.toString());
+            LOG.info("verifying root JSON node: {}", rootJsonNode);
 
             result = verifyJsonNode(rootJsonNode);
         } else {
-            LOG.debug("verifying path: {} for root JSON node: {}", jsonNodeToVerify, rootJsonNode.toString());
+            LOG.info("verifying path: {} for root JSON node: {}", jsonNodeToVerify, rootJsonNode);
 
             if (rootJsonNode.path(jsonNodeToVerify).isMissingNode()) {
                 LOG.warn("JSON node to verify attributes on does not exist: {}", jsonNodeToVerify);

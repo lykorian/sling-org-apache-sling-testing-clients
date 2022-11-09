@@ -16,11 +16,37 @@
  */
 package org.apache.sling.testing.clients;
 
-import org.apache.http.*;
+import java.io.Closeable;
+import java.io.IOException;
+import java.lang.reflect.Constructor;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+import org.apache.http.Header;
+import org.apache.http.HttpEntity;
+import org.apache.http.HttpHost;
+import org.apache.http.HttpRequest;
+import org.apache.http.HttpResponse;
+import org.apache.http.NameValuePair;
 import org.apache.http.annotation.Contract;
 import org.apache.http.annotation.ThreadingBehavior;
-import org.apache.http.client.*;
-import org.apache.http.client.methods.*;
+import org.apache.http.client.ClientProtocolException;
+import org.apache.http.client.CookieStore;
+import org.apache.http.client.CredentialsProvider;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.ResponseHandler;
+import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.http.client.methods.HttpDelete;
+import org.apache.http.client.methods.HttpEntityEnclosingRequestBase;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.methods.HttpHead;
+import org.apache.http.client.methods.HttpPatch;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.client.methods.HttpPut;
+import org.apache.http.client.methods.HttpUriRequest;
 import org.apache.http.client.protocol.HttpClientContext;
 import org.apache.http.client.utils.URIBuilder;
 import org.apache.http.impl.client.CloseableHttpClient;
@@ -30,15 +56,6 @@ import org.apache.sling.testing.clients.exceptions.TestingIOException;
 import org.apache.sling.testing.clients.exceptions.TestingValidationException;
 import org.apache.sling.testing.clients.util.HttpUtils;
 import org.slf4j.LoggerFactory;
-
-import java.io.Closeable;
-import java.io.IOException;
-import java.lang.reflect.Constructor;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
 
 import static org.apache.sling.testing.Constants.EXPECTED_STATUS;
 
@@ -317,7 +334,7 @@ public class AbstractSlingClient implements HttpClient, Closeable {
         context.setAttribute(EXPECTED_STATUS, expectedStatus);
 
         // add headers
-        if (headers != null) {
+        if (headers != null && !headers.isEmpty()) {
             request.setHeaders(headers.toArray(new Header[headers.size()]));
         }
         SlingHttpResponse response = null;
@@ -372,7 +389,7 @@ public class AbstractSlingClient implements HttpClient, Closeable {
         HttpRequest request = new BasicHttpRequest(method, uri);
 
         // add headers
-        if (headers != null) {
+        if (headers != null && !headers.isEmpty()) {
             request.setHeaders(headers.toArray(new Header[headers.size()]));
         }
 

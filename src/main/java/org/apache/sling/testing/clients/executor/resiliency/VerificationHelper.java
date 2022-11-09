@@ -1,29 +1,25 @@
 package org.apache.sling.testing.clients.executor.resiliency;
 
-import java.time.Duration;
 import java.util.concurrent.Callable;
-import java.util.concurrent.TimeUnit;
 
-import org.apache.sling.testing.clients.executor.builder.ConditionFactoryBuilder;
-import org.apache.sling.testing.clients.executor.config.VerificationConfig;
+import org.apache.sling.testing.clients.exceptions.TestingValidationException;
+import org.awaitility.core.ConditionFactory;
+import org.awaitility.core.ConditionTimeoutException;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class VerificationHelper {
+/**
+ * Request verification helper.
+ */
+public final class VerificationHelper {
 
     private static final Logger LOG = LoggerFactory.getLogger(VerificationHelper.class);
 
-    private final Duration delay;
-    private final Duration initial;
-    private final long multiplier;
-    private final Duration timeout;
+    private final ConditionFactory conditionFactory;
 
-    public VerificationHelper(@NotNull final VerificationConfig config) {
-        delay = config.getDelay();
-        initial = config.getInitial();
-        multiplier = config.getMultiplier();
-        timeout = config.getTimeout();
+    public VerificationHelper(@NotNull final ConditionFactory conditionFactory) {
+        this.conditionFactory = conditionFactory;
     }
 
     /**
@@ -32,23 +28,22 @@ public class VerificationHelper {
      * @param request the request to perform, return true if a mutation was made, false otherwise
      * @param verifier the verifier to call if a mutation was made
      */
-    public final void mayRequestAndVerify(@NotNull final Callable<Boolean> request,
-        @NotNull final Callable<Boolean> verifier) {
-        LOG.info("Sending request...");
+    public void mayRequestAndVerify(@NotNull final Callable<Boolean> request,
+        @NotNull final Callable<Boolean> verifier) throws TestingValidationException {
+        LOG.info("sending request...");
 
         boolean requestPerformed;
 
         try {
             requestPerformed = request.call();
         } catch (Exception e) {
-            throw new RuntimeException("Failed to call request", e);
+            throw new TestingValidationException("error calling request", e);
         }
 
         if (requestPerformed) {
-            sleep();
             waitUntilReflected(verifier);
         } else {
-            LOG.debug("No request performed, not waiting");
+            LOG.debug("no request performed, not waiting");
         }
     }
 
@@ -58,39 +53,26 @@ public class VerificationHelper {
      * @param request the request to perform
      * @param verifier the verifier to ensure the mutation is reflected
      */
-    public final void requestAndVerify(@NotNull final Callable<?> request, @NotNull final Callable<Boolean> verifier) {
-        LOG.info("Sending request...");
+    public void requestAndVerify(@NotNull final Callable<?> request, @NotNull final Callable<Boolean> verifier)
+        throws TestingValidationException {
+        LOG.info("sending request...");
 
         try {
             request.call();
         } catch (Exception e) {
-            throw new RuntimeException("Failed to call request", e);
+            throw new TestingValidationException("error calling request", e);
         }
 
-        sleep();
         waitUntilReflected(verifier);
     }
 
-    private void sleep() {
-        LOG.info("Waiting for initial duration of {}ms before verifying...", delay.toMillis());
+    private void waitUntilReflected(final Callable<Boolean> verifier) throws TestingValidationException {
+        LOG.info("waiting for request to be reflected...");
 
         try {
-            TimeUnit.MILLISECONDS.sleep(delay.toMillis());
-        } catch (InterruptedException e) {
-            LOG.error("Initial verification delay interrupted", e);
-
-            Thread.currentThread().interrupt();
+            conditionFactory.until(verifier);
+        } catch (ConditionTimeoutException e) {
+            throw new TestingValidationException("timeout while waiting for request to be reflected", e);
         }
-    }
-
-    private void waitUntilReflected(final Callable<Boolean> verifier) {
-        LOG.info("Waiting for request to be reflected...");
-
-        ConditionFactoryBuilder.getInstance()
-            .withInitial(initial)
-            .withMultiplier(multiplier)
-            .withTimeout(timeout)
-            .build()
-            .until(verifier);
     }
 }
