@@ -2,8 +2,8 @@ package org.apache.sling.testing.clients.executor;
 
 import java.net.URI;
 import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -16,6 +16,10 @@ import org.apache.http.NameValuePair;
 import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.HttpUriRequest;
 import org.apache.http.client.methods.RequestBuilder;
+import org.apache.http.entity.ContentType;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.entity.mime.MultipartEntityBuilder;
+import org.apache.http.entity.mime.content.StringBody;
 import org.apache.http.message.BasicNameValuePair;
 import org.apache.sling.testing.clients.ClientException;
 import org.apache.sling.testing.clients.SlingClient;
@@ -30,13 +34,16 @@ import org.apache.sling.testing.clients.executor.resiliency.VerificationHelper;
 import org.apache.sling.testing.clients.executor.verifier.JsonNodeVerifier;
 import org.apache.sling.testing.clients.util.FormEntityBuilder;
 import org.apache.sling.testing.clients.util.JsonUtils;
+import org.apache.sling.testing.clients.util.MultiPartNameValuePair;
 import org.awaitility.core.ConditionFactory;
 import org.awaitility.core.ConditionTimeoutException;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
  * Builder for retryable HTTP request executions.
@@ -48,6 +55,9 @@ public final class RequestExecutor {
 
     /** Logger. */
     private static final Logger LOG = LoggerFactory.getLogger(RequestExecutor.class);
+
+    /** JSON mapper. */
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /** Default node depth for JSON requests. */
     private static final int DEFAULT_JSON_DEPTH = 2;
@@ -86,6 +96,9 @@ public final class RequestExecutor {
 
     /** Mutation request helper. */
     private VerificationHelper verificationHelper = new VerificationHelper(verificationConditionFactory);
+
+    /** Alias for condition logging. */
+    private String alias;
 
     /** Expected HTTP status. */
     private int[] expectedStatus = new int[0];
@@ -309,6 +322,18 @@ public final class RequestExecutor {
     }
 
     /**
+     * Set the request form entity with the given parameter map.
+     *
+     * @param formParameters parameters to use for building form entity
+     * @return this
+     */
+    public RequestExecutor withFormParameters(@NotNull final Map<String, String> formParameters) {
+        withForm(FormEntityBuilder.create().addAllParameters(formParameters));
+
+        return this;
+    }
+
+    /**
      * Set the request entity.
      *
      * @param entity HTTP entity
@@ -318,6 +343,63 @@ public final class RequestExecutor {
         delegate.setEntity(entity);
 
         return this;
+    }
+
+    /**
+     * Set the request entity by serializing the provided object to JSON.
+     *
+     * @param objectToSerializeAsJson object to serialize
+     * @return this
+     * @throws JsonProcessingException if object cannot be serialized as JSON
+     */
+    public RequestExecutor withJsonEntity(@NotNull final Object objectToSerializeAsJson)
+        throws JsonProcessingException {
+        final String json = MAPPER.writeValueAsString(objectToSerializeAsJson);
+
+        return withEntity(new StringEntity(json, ContentType.APPLICATION_JSON));
+    }
+
+    /**
+     * Set a multipart request entity with the provided parameters.
+     *
+     * @param parameters parameter map
+     * @return this
+     */
+    public RequestExecutor withMultipartEntity(@NotNull final Map<String, String> parameters) {
+        final MultipartEntityBuilder multiPartEntity = MultipartEntityBuilder.create().setLaxMode();
+
+        for (final Map.Entry<String, String> entry : parameters.entrySet()) {
+            multiPartEntity.addPart(entry.getKey(), new StringBody(entry.getValue(), ContentType.MULTIPART_FORM_DATA));
+        }
+
+        return withEntity(multiPartEntity.build());
+    }
+
+    /**
+     * Set a multipart request entity with the provided parameters.
+     *
+     * @param parameters multipart parameter list
+     * @return this
+     */
+    public RequestExecutor withMultipartEntity(@NotNull final List<MultiPartNameValuePair> parameters) {
+        final MultipartEntityBuilder multiPartEntity = MultipartEntityBuilder.create()
+            .setStrictMode()
+            .setBoundary("crxde")
+            .setCharset(StandardCharsets.UTF_8);
+
+        for (final MultiPartNameValuePair pair : parameters) {
+            final ContentType contentType;
+
+            if (null == pair.getMimetype()) {
+                contentType = ContentType.MULTIPART_FORM_DATA;
+            } else {
+                contentType = ContentType.create(pair.getMimetype(), pair.getCharset());
+            }
+
+            multiPartEntity.addPart(pair.getName(), new StringBody(pair.getValue(), contentType));
+        }
+
+        return withEntity(multiPartEntity.build());
     }
 
     /**
@@ -401,6 +483,7 @@ public final class RequestExecutor {
      * the configured {@link RetryHelper} for GET, HEAD, OPTIONS, and TRACE requests.
      *
      * @return Sling HTTP response
+     * @throws TestingValidationException if request cannot be executed or does not meet expected conditions
      */
     public SlingHttpResponse execute() throws TestingValidationException {
         final HttpUriRequest request = getRequest();
@@ -427,6 +510,7 @@ public final class RequestExecutor {
      * Execute a request and retry until the expected HTTP response status code is returned, then verify the result.
      *
      * @param verifier verification task
+     * @throws TestingValidationException if request cannot be executed or does not meet expected conditions
      */
     public void executeAndVerify(@NotNull final Callable<Boolean> verifier) throws TestingValidationException {
         try {
@@ -442,6 +526,7 @@ public final class RequestExecutor {
      *
      * @param precondition only execute and verify the request if this evaluates to <code>true</code>
      * @param verifier verification task
+     * @throws TestingValidationException if request cannot be executed or does not meet expected conditions
      */
     public void mayExecuteAndVerify(@NotNull final Callable<Boolean> precondition,
         @NotNull final Callable<Boolean> verifier) throws TestingValidationException {
@@ -463,10 +548,28 @@ public final class RequestExecutor {
      *
      * @return JSON node
      * @throws TestingIOException if the response body cannot be parsed as a JSON node
-     * @throws TestingValidationException if an error occurs during request execution
+     * @throws TestingValidationException if request cannot be executed or does not meet expected conditions
      */
     public JsonNode getJsonNode() throws TestingIOException, TestingValidationException {
         return getAsJsonNode(execute());
+    }
+
+    /**
+     * Execute a request for a path returning a JSON response (e.g. <code>/bin/querybuilder.json</code>).  Unlike the
+     * <code>getAsJsonNode</code> methods, this method does not append a depth selector or <code>.json</code>
+     * extension to the request path.  This method should be used for requesting servlet paths that return JSON
+     * responses, whereas the <code>getJsonNode</code> methods should be used to return the default JSON rendering for a
+     * given resource path.  The JSON response will then be mapped using the provided type to return a deserialized Java
+     * object.
+     *
+     * @param type type to map JSON response
+     * @param <T> type
+     * @return object from deserializing JSON response
+     * @throws TestingIOException if the response body cannot be parsed as a JSON node
+     * @throws TestingValidationException if request cannot be executed or does not meet expected conditions
+     */
+    public <T> T getJsonNodeAsType(final Class<T> type) throws TestingIOException, TestingValidationException {
+        return getJsonNodeAsType(execute(), type);
     }
 
     /**
@@ -474,7 +577,7 @@ public final class RequestExecutor {
      * returns <code>true</code>.
      *
      * @throws TestingIOException if the response body cannot be parsed as a JSON node
-     * @throws TestingValidationException if an error occurs during request execution
+     * @throws TestingValidationException if request cannot be executed or does not meet expected conditions
      */
     public JsonNode getJsonNode(final JsonNodeVerifier nodeVerifier)
         throws TestingIOException, TestingValidationException {
@@ -493,7 +596,7 @@ public final class RequestExecutor {
      * OPTIONS, and TRACE requests.
      *
      * @return JSON node
-     * @throws TestingValidationException if an error occurs during request execution
+     * @throws TestingValidationException if request cannot be executed or does not meet expected conditions
      */
     public JsonNode getAsJsonNode() throws TestingValidationException {
         return getAsJsonNode(DEFAULT_JSON_DEPTH);
@@ -506,7 +609,7 @@ public final class RequestExecutor {
      *
      * @param depth JSON node depth
      * @return JSON node
-     * @throws TestingValidationException if an error occurs during request execution
+     * @throws TestingValidationException if request cannot be executed or does not meet expected conditions
      */
     public JsonNode getAsJsonNode(final int depth) throws TestingValidationException {
         JsonNode jsonNode = null;
@@ -530,11 +633,10 @@ public final class RequestExecutor {
      * for GET, HEAD, OPTIONS, and TRACE requests.
      *
      * @param nodeVerifier JSON node verifier
-     * @return true if JSON node state is verified
-     * @throws TestingValidationException if an error occurs during request execution
+     * @throws TestingValidationException if request cannot be executed or does not meet expected conditions
      */
-    public boolean verifyJsonNode(@NotNull final JsonNodeVerifier nodeVerifier) throws TestingValidationException {
-        return verifyJsonNode(DEFAULT_JSON_DEPTH, nodeVerifier);
+    public void verifyJsonNode(@NotNull final JsonNodeVerifier nodeVerifier) throws TestingValidationException {
+        verifyJsonNode(DEFAULT_JSON_DEPTH, nodeVerifier);
     }
 
     /**
@@ -544,26 +646,21 @@ public final class RequestExecutor {
      *
      * @param depth JSON node depth
      * @param nodeVerifier JSON node verifier
-     * @return true if JSON node state is verified
-     * @throws TestingValidationException if an error occurs during request execution
+     * @throws TestingValidationException if request cannot be executed or does not meet expected conditions
      */
-    public boolean verifyJsonNode(final int depth, @NotNull final JsonNodeVerifier nodeVerifier)
+    public void verifyJsonNode(final int depth, @NotNull final JsonNodeVerifier nodeVerifier)
         throws TestingValidationException {
-        boolean verified = false;
-
         try {
             if (disableRetry) {
-                verified = verifyJsonNode(doGetJson(depth), nodeVerifier);
+                verifyJsonNode(doGetJson(depth), nodeVerifier);
             } else {
                 final Callable<JsonNode> request = () -> doGetJson(depth);
 
-                verified = retryHelper.retryUntilTrue(() -> verifyJsonNode(request.call(), nodeVerifier));
+                retryHelper.retryUntilExceptionNotThrown(() -> verifyJsonNode(request.call(), nodeVerifier));
             }
         } catch (ConditionTimeoutException | ClientException e) {
             logAndThrowException(e);
         }
-
-        return verified;
     }
 
     // internals
@@ -612,9 +709,9 @@ public final class RequestExecutor {
         final SlingHttpResponse response;
 
         if (stream) {
-            response = client.doStreamRequest(request, Collections.emptyList(), expectedStatus);
+            response = client.doStreamRequest(request, null, expectedStatus);
         } else {
-            response = client.doRequest(request, Collections.emptyList(), expectedStatus);
+            response = client.doRequest(request, null, expectedStatus);
         }
 
         return response;
@@ -623,7 +720,7 @@ public final class RequestExecutor {
     private HttpUriRequest getRequest() {
         final HttpUriRequest request = delegate.build();
 
-        LOG.info("executing HTTP request: {}", request);
+        LOG.debug("executing HTTP request: {}", request);
 
         return request;
     }
@@ -633,23 +730,34 @@ public final class RequestExecutor {
      *
      * @param jsonNode JSON node
      * @param nodeVerifier JSON node verifier
-     * @return true if JSON node is verified
+     * @throws TestingValidationException if JSON node verification fails
      */
-    private boolean verifyJsonNode(final JsonNode jsonNode, @NotNull final JsonNodeVerifier nodeVerifier) {
-        boolean verified = false;
-
+    private Void verifyJsonNode(final JsonNode jsonNode, @NotNull final JsonNodeVerifier nodeVerifier)
+        throws TestingValidationException {
         if (jsonNode == null) {
             LOG.warn("JSON node not found");
+
+            throw new TestingValidationException("JSON node not found");
         } else if (!nodeVerifier.verify(jsonNode)) {
             LOG.warn("JSON node to verify in invalid state: {}", jsonNode);
+
+            throw new TestingValidationException("JSON node to verify in invalid state: " + jsonNode);
         } else {
-            verified = true;
+            LOG.debug("JSON node verified, continuing...");
         }
 
-        return verified;
+        return null;
     }
 
     private JsonNode getAsJsonNode(final SlingHttpResponse response) throws TestingIOException {
         return JsonUtils.getJsonNodeFromString(response.getContent());
+    }
+
+    private <T> T getJsonNodeAsType(final SlingHttpResponse response, final Class<T> type) throws TestingIOException {
+        try {
+            return MAPPER.readValue(response.getContent(), type);
+        } catch (JsonProcessingException e) {
+            throw new TestingIOException("error reading JSON node as type: " + type, e);
+        }
     }
 }

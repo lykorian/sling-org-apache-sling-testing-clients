@@ -9,6 +9,7 @@ import org.awaitility.core.ConditionFactory;
 import org.awaitility.core.ConditionTimeoutException;
 import org.jetbrains.annotations.NotNull;
 
+import static org.hamcrest.Matchers.anything;
 import static org.hamcrest.Matchers.is;
 
 /**
@@ -66,6 +67,19 @@ public final class RetryHelper {
         @NotNull final ConditionFactory conditionFactory) throws TestingValidationException {
         try {
             return conditionFactory.until(supplier, is(true));
+        } catch (ConditionTimeoutException e) {
+            throw new TestingValidationException("timeout waiting for condition", e);
+        }
+    }
+
+    public void retryUntilExceptionNotThrown(@NotNull final Callable<Void> supplier) throws TestingValidationException {
+        retryUntilExceptionNotThrown(supplier, defaultConditionFactory);
+    }
+
+    public void retryUntilExceptionNotThrown(@NotNull final Callable<Void> supplier,
+        @NotNull final ConditionFactory conditionFactory) throws TestingValidationException {
+        try {
+            conditionFactory.until(supplier, anything());
         } catch (ConditionTimeoutException e) {
             throw new TestingValidationException("timeout waiting for condition", e);
         }

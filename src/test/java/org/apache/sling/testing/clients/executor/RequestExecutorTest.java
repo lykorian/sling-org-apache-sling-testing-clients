@@ -247,6 +247,21 @@ public class RequestExecutorTest {
     }
 
     @Test
+    public void testRequestPostFormParameters() throws TestingValidationException {
+        final Map<String, String> parameters = new LinkedHashMap<>();
+
+        parameters.put("one", "1");
+        parameters.put("two", "2");
+
+        final SlingHttpResponse response = client.post("/form")
+            .withFormParameters(parameters)
+            .execute();
+
+        assertEquals(HttpStatus.SC_CREATED, response.getStatusLine().getStatusCode());
+        assertEquals("test?one=1&two=2", response.getContent());
+    }
+
+    @Test
     public void testRequestPostEntity() throws TestingValidationException {
         final SlingHttpResponse response = client.post("/form")
             .withEntity(FormEntityBuilder.create()
