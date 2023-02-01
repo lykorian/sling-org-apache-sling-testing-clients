@@ -59,6 +59,8 @@ public class SystemPropertiesConfig {
      */
     public static final String HTTP_RETRIES_ERROR_CODES_PROP = "http.retriesErrorCodes";
 
+    private static final HttpLoggingConfig HTTP_LOGGING_CONFIG = new HttpLoggingConfig();
+
     public static String getPrefixedPropertyName(String prop) {
         return SystemPropertiesConfig.CONFIG_PROP_PREFIX + prop;
     }
@@ -132,4 +134,7 @@ public class SystemPropertiesConfig {
         }
     }
 
+    public static HttpLoggingConfig getHttpLoggingConfig() {
+        return HTTP_LOGGING_CONFIG;
+    }
 }

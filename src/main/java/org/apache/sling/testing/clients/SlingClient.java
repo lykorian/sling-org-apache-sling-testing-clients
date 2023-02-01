@@ -16,9 +16,6 @@
  */
 package org.apache.sling.testing.clients;
 
-import static org.apache.http.HttpStatus.SC_CREATED;
-import static org.apache.http.HttpStatus.SC_OK;
-
 import java.io.File;
 import java.net.URI;
 import java.util.ArrayList;
@@ -28,7 +25,6 @@ import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpRequestInterceptor;
@@ -49,6 +45,7 @@ import org.apache.http.impl.cookie.BasicClientCookie;
 import org.apache.sling.testing.clients.exceptions.TestingValidationException;
 import org.apache.sling.testing.clients.interceptors.DelayRequestInterceptor;
 import org.apache.sling.testing.clients.interceptors.HttpRequestResponseInterceptor;
+import org.apache.sling.testing.clients.interceptors.LoggingInterceptor;
 import org.apache.sling.testing.clients.interceptors.TestDescriptionInterceptor;
 import org.apache.sling.testing.clients.util.FormEntityBuilder;
 import org.apache.sling.testing.clients.util.HttpUtils;
@@ -57,6 +54,11 @@ import org.apache.sling.testing.clients.util.ServerErrorRetryStrategy;
 import org.apache.sling.testing.clients.util.poller.AbstractPoller;
 import org.apache.sling.testing.clients.util.poller.Polling;
 import org.apache.sling.testing.timeouts.TimeoutsProvider;
+
+import com.fasterxml.jackson.databind.JsonNode;
+
+import static org.apache.http.HttpStatus.SC_CREATED;
+import static org.apache.http.HttpStatus.SC_OK;
 
 
 /**
@@ -157,7 +159,7 @@ public class SlingClient extends AbstractSlingClient {
      * If the node already exists, the method will return null, with no errors.<br>
      * The method ignores trailing slashes so a path like this <i>/a/b/c///</i> is accepted and will create the <i>c</i> node if the rest of
      * the path exists.
-     * 
+     *
      * @param path the path to the node to create
      * @param nodeType the type of the node to create
      * @return the sling HTTP response or null if the path already existed
@@ -751,6 +753,10 @@ public class SlingClient extends AbstractSlingClient {
             // Interceptors
             httpClientBuilder.addInterceptorLast(new TestDescriptionInterceptor());
             httpClientBuilder.addInterceptorLast(new DelayRequestInterceptor(SystemPropertiesConfig.getHttpDelay()));
+
+            if (SystemPropertiesConfig.getHttpLoggingConfig().isEnabled()) {
+                httpClientBuilder.addInterceptorLast(new LoggingInterceptor());
+            }
 
             // HTTP request strategy
             httpClientBuilder.setServiceUnavailableRetryStrategy(new ServerErrorRetryStrategy());
