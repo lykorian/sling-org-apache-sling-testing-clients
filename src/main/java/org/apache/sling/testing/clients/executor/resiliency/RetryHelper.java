@@ -75,6 +75,19 @@ public final class RetryHelper {
         }
     }
 
+    public <T> T retryUntilExceptionNotThrown(@NotNull final Callable<T> supplier) throws TestingValidationException {
+        return retryUntilExceptionNotThrown(supplier, defaultConditionFactory);
+    }
+
+    public <T> T retryUntilExceptionNotThrown(@NotNull final Callable<T> supplier,
+        @NotNull final ConditionFactory conditionFactory) throws TestingValidationException {
+        try {
+            return conditionFactory.until(supplier, anything());
+        } catch (ConditionTimeoutException e) {
+            throw new TestingValidationException("timeout waiting for condition", e);
+        }
+    }
+
     public boolean retryUntilTrue(@NotNull final Callable<Boolean> supplier) throws TestingValidationException {
         return retryUntilTrue(supplier, defaultConditionFactory);
     }
@@ -83,19 +96,6 @@ public final class RetryHelper {
         @NotNull final ConditionFactory conditionFactory) throws TestingValidationException {
         try {
             return conditionFactory.until(supplier, is(true));
-        } catch (ConditionTimeoutException e) {
-            throw new TestingValidationException("timeout waiting for condition", e);
-        }
-    }
-
-    public void retryUntilExceptionNotThrown(@NotNull final Callable<Void> supplier) throws TestingValidationException {
-        retryUntilExceptionNotThrown(supplier, defaultConditionFactory);
-    }
-
-    public void retryUntilExceptionNotThrown(@NotNull final Callable<Void> supplier,
-        @NotNull final ConditionFactory conditionFactory) throws TestingValidationException {
-        try {
-            conditionFactory.until(supplier, anything());
         } catch (ConditionTimeoutException e) {
             throw new TestingValidationException("timeout waiting for condition", e);
         }
