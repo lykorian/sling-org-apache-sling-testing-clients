@@ -47,6 +47,7 @@ import org.apache.sling.testing.clients.interceptors.DelayRequestInterceptor;
 import org.apache.sling.testing.clients.interceptors.HttpRequestResponseInterceptor;
 import org.apache.sling.testing.clients.interceptors.LoggingInterceptor;
 import org.apache.sling.testing.clients.interceptors.TestDescriptionInterceptor;
+import org.apache.sling.testing.clients.interceptors.UserAgentInterceptor;
 import org.apache.sling.testing.clients.util.FormEntityBuilder;
 import org.apache.sling.testing.clients.util.HttpUtils;
 import org.apache.sling.testing.clients.util.JsonUtils;
@@ -746,12 +747,13 @@ public class SlingClient extends AbstractSlingClient {
          */
         private InternalBuilder setDefaults() {
             httpClientBuilder.useSystemProperties();
-            httpClientBuilder.setUserAgent("Java");
+            httpClientBuilder.setUserAgent(SystemPropertiesConfig.getDefaultUserAgent());
             // Connection
             httpClientBuilder.setMaxConnPerRoute(10);
             httpClientBuilder.setMaxConnTotal(100);
             // Interceptors
             httpClientBuilder.addInterceptorLast(new TestDescriptionInterceptor());
+            httpClientBuilder.addInterceptorLast(new UserAgentInterceptor());
             httpClientBuilder.addInterceptorLast(new DelayRequestInterceptor(SystemPropertiesConfig.getHttpDelay()));
 
             if (SystemPropertiesConfig.getHttpLoggingConfig().isEnabled()) {
