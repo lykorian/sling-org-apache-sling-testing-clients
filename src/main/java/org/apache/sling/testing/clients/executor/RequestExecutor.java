@@ -22,6 +22,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -69,6 +70,19 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  */
 public final class RequestExecutor {
 
+    /** Value to String conversion function for condition logging. */
+    public static final Function<Object, String> DEFAULT_VALUE_TO_STRING_FUNCTION = value -> {
+        final String valueAsString;
+
+        if (value instanceof SlingHttpResponse) {
+            valueAsString = ((SlingHttpResponse) value).getStatusLine().toString();
+        } else {
+            valueAsString = value.toString();
+        }
+
+        return valueAsString;
+    };
+
     /** Logger. */
     private static final Logger LOG = LoggerFactory.getLogger(RequestExecutor.class);
 
@@ -84,37 +98,18 @@ public final class RequestExecutor {
     /** HTTP request builder to encapsulate HTTP client request properties. */
     private final RequestBuilder delegate;
 
-    /** Value to String conversion function for condition logging. */
-    private static final Function<Object, String> VALUE_TO_STRING = value -> {
-        final String valueAsString;
-
-        if (value instanceof SlingHttpResponse) {
-            valueAsString = ((SlingHttpResponse) value).getStatusLine().toString();
-        } else {
-            valueAsString = value.toString();
-        }
-
-        return valueAsString;
-    };
-
     /** Condition factory for request retries. */
     private ConditionFactory retryConditionFactory = ConditionFactoryBuilder.getInstance()
-        .withValueToStringFunction(VALUE_TO_STRING)
+        .withValueToStringFunction(true, DEFAULT_VALUE_TO_STRING_FUNCTION)
+        .withValueToStringFunction(false, DEFAULT_VALUE_TO_STRING_FUNCTION)
         .build();
 
     /** Condition factory for request verification. */
     private ConditionFactory verificationConditionFactory = ConditionFactoryBuilder.getInstance()
+        .withValueToStringFunction(true, DEFAULT_VALUE_TO_STRING_FUNCTION)
+        .withValueToStringFunction(false, DEFAULT_VALUE_TO_STRING_FUNCTION)
         .withDelay(Duration.ofSeconds(10))
         .build();
-
-    /** Resiliency helper. */
-    private RetryHelper retryHelper = new RetryHelper(retryConditionFactory);
-
-    /** Mutation request helper. */
-    private VerificationHelper verificationHelper = new VerificationHelper(verificationConditionFactory);
-
-    /** Alias for condition logging. */
-    private String alias;
 
     /** Expected HTTP status. */
     private int[] expectedStatus = new int[0];
@@ -133,6 +128,12 @@ public final class RequestExecutor {
 
     /** If true, stream request without consuming the response entity. */
     private boolean stream;
+
+    /** Alias for condition logging. */
+    private String alias;
+
+    /** Built request cache. */
+    private HttpUriRequest request;
 
     /**
      * Create a new request executor.
@@ -450,8 +451,6 @@ public final class RequestExecutor {
     public RequestExecutor withRetryConditionFactory(@NotNull final ConditionFactory retryConditionFactory) {
         this.retryConditionFactory = retryConditionFactory;
 
-        retryHelper = new RetryHelper(retryConditionFactory);
-
         return this;
     }
 
@@ -464,8 +463,6 @@ public final class RequestExecutor {
     public RequestExecutor withVerificationConditionFactory(@NotNull final ConditionFactory verificationConditionFactory) {
         this.verificationConditionFactory = verificationConditionFactory;
 
-        verificationHelper = new VerificationHelper(verificationConditionFactory);
-
         return this;
     }
 
@@ -476,8 +473,7 @@ public final class RequestExecutor {
      * @return this
      */
     public RequestExecutor withAlias(@NotNull final String alias) {
-        withRetryConditionFactory(retryConditionFactory.alias(alias));
-        withVerificationConditionFactory(verificationConditionFactory.alias(alias));
+        this.alias = alias;
 
         return this;
     }
@@ -503,6 +499,7 @@ public final class RequestExecutor {
      */
     public SlingHttpResponse execute() throws TestingValidationException {
         final HttpUriRequest request = getRequest();
+
         SlingHttpResponse response = null;
 
         try {
@@ -513,7 +510,7 @@ public final class RequestExecutor {
                     throw new TestingValidationException("HTTP response body does not meet expected condition");
                 }
             } else {
-                response = retryHelper.retryUntilCondition(() -> doRequest(request), getPredicate());
+                response = getRetryHelper().retryUntilCondition(() -> doRequest(request), getPredicate());
             }
         } catch (ConditionTimeoutException | ClientException e) {
             logAndThrowException(e);
@@ -530,7 +527,7 @@ public final class RequestExecutor {
      */
     public void executeAndVerify(@NotNull final Callable<Boolean> verifier) throws TestingValidationException {
         try {
-            verificationHelper.requestAndVerify(this::execute, verifier);
+            getVerificationHelper().requestAndVerify(this::execute, verifier);
         } catch (TestingValidationException e) {
             logAndThrowException(e);
         }
@@ -634,7 +631,7 @@ public final class RequestExecutor {
             if (disableRetry) {
                 jsonNode = doGetJson(depth);
             } else {
-                jsonNode = retryHelper.retryUntilExists(() -> doGetJson(depth));
+                jsonNode = getRetryHelper().retryUntilExists(() -> doGetJson(depth));
             }
         } catch (ConditionTimeoutException | ClientException e) {
             logAndThrowException(e);
@@ -672,7 +669,7 @@ public final class RequestExecutor {
             } else {
                 final Callable<JsonNode> request = () -> doGetJson(depth);
 
-                retryHelper.retryUntilExceptionNotThrown(() -> verifyJsonNode(request.call(), nodeVerifier));
+                getRetryHelper().retryUntilExceptionNotThrown(() -> verifyJsonNode(request.call(), nodeVerifier));
             }
         } catch (ConditionTimeoutException | ClientException e) {
             logAndThrowException(e);
@@ -680,6 +677,26 @@ public final class RequestExecutor {
     }
 
     // internals
+
+    private RetryHelper getRetryHelper() {
+        final String alias = Optional.ofNullable(this.alias)
+            .orElse(getDefaultAlias());
+
+        return new RetryHelper(retryConditionFactory.alias(alias));
+    }
+
+    private String getDefaultAlias() {
+        final HttpUriRequest request = getRequest();
+
+        return new StringBuilder(request.getMethod())
+            .append(" ")
+            .append(request.getURI().getPath())
+            .toString();
+    }
+
+    private VerificationHelper getVerificationHelper() {
+        return new VerificationHelper(verificationConditionFactory);
+    }
 
     /**
      * Get the Sling HTTP response predicate based on the expected conditions.
@@ -734,9 +751,11 @@ public final class RequestExecutor {
     }
 
     private HttpUriRequest getRequest() {
-        final HttpUriRequest request = delegate.build();
+        if (request == null) {
+            request = delegate.build();
 
-        LOG.debug("executing HTTP request: {}", request);
+            LOG.debug("HTTP request: {}", request);
+        }
 
         return request;
     }

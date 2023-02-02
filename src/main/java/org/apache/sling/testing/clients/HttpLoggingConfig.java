@@ -17,6 +17,7 @@
 package org.apache.sling.testing.clients;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -57,9 +58,13 @@ public final class HttpLoggingConfig {
     }
 
     public Set<String> getExcludedHeaders() {
-        final String excludedHeaders = System.getProperty(getPrefixedPropertyName(EXCLUDED_HEADERS), "");
+        final String excludedHeaders = System.getProperty(getPrefixedPropertyName(EXCLUDED_HEADERS));
 
-        return new HashSet<>(Arrays.asList(excludedHeaders.split(",")));
+        if (excludedHeaders == null) {
+            return Collections.emptySet();
+        } else {
+            return new HashSet<>(Arrays.asList(excludedHeaders.split(",")));
+        }
     }
 
     private String getPrefixedPropertyName(final String prop) {

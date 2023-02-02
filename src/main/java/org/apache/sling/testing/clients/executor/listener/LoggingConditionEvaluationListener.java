@@ -16,6 +16,7 @@
  */
 package org.apache.sling.testing.clients.executor.listener;
 
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
@@ -34,35 +35,35 @@ public final class LoggingConditionEvaluationListener implements ConditionEvalua
 
     private final AtomicInteger counter = new AtomicInteger(0);
 
-    private final Function<Object, String> valueToString;
+    private final Map<Boolean, Function<Object, String>> valueToStringFunctions;
 
     /**
      * Create a new condition logger.
      *
-     * @param valueToString function to use to convert the condition value to a String (instead of the default
-     *     <code>Object.toString</code> method) for more informative logging
+     * @param valueToStringFunctions map containing functions to use to convert the condition value to a String
+     *     (instead of the default <code>Object.toString</code> method) for more informative logging; <code>true</code>
+     *     map key should contain the "satisfied" function and <code>false</code> key should contain the "not satisfied"
+     *     function
      */
-    public LoggingConditionEvaluationListener(final Function<Object, String> valueToString) {
-        this.valueToString = valueToString;
+    public LoggingConditionEvaluationListener(final Map<Boolean, Function<Object, String>> valueToStringFunctions) {
+        this.valueToStringFunctions = valueToStringFunctions;
     }
 
     @Override
     public void conditionEvaluated(final EvaluatedCondition condition) {
         final int count = counter.incrementAndGet();
 
+        final Function<Object, String> valueToString = valueToStringFunctions.get(condition.isSatisfied());
+
         if (condition.isSatisfied()) {
-            LOG.info("{} satisfied after {} attempt(s) in {}ms, value: {}", getConditionLog(condition), count,
+            LOG.info("condition satisfied after {} attempt(s) in {}ms, value: {}", count,
                 condition.getElapsedTimeInMS(), getStringValue(condition.getValue(), valueToString));
         } else {
-            LOG.info("{} not satisfied after {} attempt(s), poll interval: {}ms, elapsed time: {}ms, " +
-                    "remaining time: {}ms, current value: {}", getConditionLog(condition), count,
-                condition.getPollInterval().toMillis(), condition.getElapsedTimeInMS(),
+            LOG.info("condition not satisfied after {} attempt(s), poll interval: {}ms, elapsed time: {}ms, " +
+                    "remaining time: {}ms, current value: {}", count, condition.getPollInterval().toMillis(),
+                condition.getElapsedTimeInMS(),
                 condition.getRemainingTimeInMS(), getStringValue(condition.getValue(), valueToString));
         }
-    }
-
-    private String getConditionLog(final EvaluatedCondition condition) {
-        return condition.hasAlias() ? "condition [" + condition.getAlias() + "]" : "condition";
     }
 
     private String getStringValue(final Object conditionValue, final Function<Object, String> valueToString) {

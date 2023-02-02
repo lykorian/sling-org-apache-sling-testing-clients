@@ -19,6 +19,8 @@ package org.apache.sling.testing.clients.executor.builder;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
@@ -69,7 +71,7 @@ public final class ConditionFactoryBuilder {
 
     private Class<?>[] retryOn;
 
-    private Function<Object, String> valueToString;
+    private final Map<Boolean, Function<Object, String>> valueToStringFunctions = new HashMap<>();
 
     private ConditionFactoryBuilder() {
         delay = Duration.ZERO;
@@ -143,11 +145,14 @@ public final class ConditionFactoryBuilder {
      * Set a function to use to convert the condition value to a <code>String</code> for logging.  By default, the
      * condition value will be logged using the value object's <code>toString</code> method.
      *
+     * @param conditionSatisfied true if this function should apply when condition is satisified, false for function
+     *     to apply when condition is not satisfied
      * @param valueToString to-string conversion function
      * @return this
      */
-    public ConditionFactoryBuilder withValueToStringFunction(final Function<Object, String> valueToString) {
-        this.valueToString = valueToString;
+    public ConditionFactoryBuilder withValueToStringFunction(final boolean conditionSatisfied,
+        final Function<Object, String> valueToString) {
+        valueToStringFunctions.put(conditionSatisfied, valueToString);
 
         return this;
     }
@@ -173,7 +178,7 @@ public final class ConditionFactoryBuilder {
     public ConditionFactory build() {
         return Awaitility.await(alias)
             .atMost(timeout)
-            .conditionEvaluationListener(new LoggingConditionEvaluationListener(valueToString))
+            .conditionEvaluationListener(new LoggingConditionEvaluationListener(valueToStringFunctions))
             .pollDelay(delay)
             .pollInterval(IterativePollInterval.iterative(duration -> duration.multipliedBy(multiplier), initial))
             .ignoreExceptionsMatching(getExceptionPredicate());
