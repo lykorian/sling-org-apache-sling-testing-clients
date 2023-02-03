@@ -26,7 +26,6 @@ import org.awaitility.core.ConditionTimeoutException;
 import org.jetbrains.annotations.NotNull;
 
 import static org.hamcrest.Matchers.anything;
-import static org.hamcrest.Matchers.is;
 
 /**
  * Request retry helper.
@@ -54,18 +53,39 @@ public final class RetryHelper {
      *
      * @param request request
      * @param conditionFactory condition factory
+     * @param <T> response type
      * @return response
+     * @throws TestingValidationException if timeout is reached and condition is not met
      */
     public <T> T retryUntilExists(@NotNull final Callable<T> request,
         @NotNull final ConditionFactory conditionFactory) throws TestingValidationException {
         return retryUntilCondition(request, Objects::nonNull, conditionFactory);
     }
 
+    /**
+     * Retry the request until the response meets the provided condition.
+     *
+     * @param request request
+     * @param condition predicate for evaluating response
+     * @param <T> response type
+     * @return response
+     * @throws TestingValidationException if timeout is reached and condition is not met
+     */
     public <T> T retryUntilCondition(@NotNull final Callable<T> request, @NotNull final Predicate<T> condition)
         throws TestingValidationException {
         return retryUntilCondition(request, condition, defaultConditionFactory);
     }
 
+    /**
+     * Retry the request until the response meets the provided condition.
+     *
+     * @param request request
+     * @param condition condition for evaluating response
+     * @param conditionFactory condition factory
+     * @param <T> response type
+     * @return response
+     * @throws TestingValidationException if timeout is reached and condition is not met
+     */
     public <T> T retryUntilCondition(@NotNull final Callable<T> request, @NotNull final Predicate<T> condition,
         @NotNull final ConditionFactory conditionFactory) throws TestingValidationException {
         try {
@@ -75,27 +95,57 @@ public final class RetryHelper {
         }
     }
 
-    public <T> T retryUntilExceptionNotThrown(@NotNull final Callable<T> supplier) throws TestingValidationException {
-        return retryUntilExceptionNotThrown(supplier, defaultConditionFactory);
+    /**
+     * Retry the request until an exception is not thrown.
+     *
+     * @param request request
+     * @param <T> response type
+     * @return response
+     * @throws TestingValidationException if timeout is reached and condition is not met
+     */
+    public <T> T retryUntilExceptionNotThrown(@NotNull final Callable<T> request) throws TestingValidationException {
+        return retryUntilExceptionNotThrown(request, defaultConditionFactory);
     }
 
-    public <T> T retryUntilExceptionNotThrown(@NotNull final Callable<T> supplier,
+    /**
+     * Retry the request until an exception is not thrown.
+     *
+     * @param request request
+     * @param conditionFactory condition factory
+     * @param <T> response type
+     * @return response
+     * @throws TestingValidationException if timeout is reached and condition is not met
+     */
+    public <T> T retryUntilExceptionNotThrown(@NotNull final Callable<T> request,
         @NotNull final ConditionFactory conditionFactory) throws TestingValidationException {
         try {
-            return conditionFactory.until(supplier, anything());
+            return conditionFactory.until(request, anything());
         } catch (ConditionTimeoutException e) {
             throw new TestingValidationException("timeout waiting for condition", e);
         }
     }
 
-    public boolean retryUntilTrue(@NotNull final Callable<Boolean> supplier) throws TestingValidationException {
-        return retryUntilTrue(supplier, defaultConditionFactory);
+    /**
+     * Retry the request until it returns <code>true</code>.
+     *
+     * @param request request
+     * @throws TestingValidationException if timeout is reached and condition is not met
+     */
+    public void retryUntilTrue(@NotNull final Callable<Boolean> request) throws TestingValidationException {
+        retryUntilTrue(request, defaultConditionFactory);
     }
 
-    public boolean retryUntilTrue(@NotNull final Callable<Boolean> supplier,
+    /**
+     * Retry the request until it returns <code>true</code>.
+     *
+     * @param request request
+     * @param conditionFactory condition factory
+     * @throws TestingValidationException if timeout is reached and condition is not met
+     */
+    public void retryUntilTrue(@NotNull final Callable<Boolean> request,
         @NotNull final ConditionFactory conditionFactory) throws TestingValidationException {
         try {
-            return conditionFactory.until(supplier, is(true));
+            conditionFactory.until(request);
         } catch (ConditionTimeoutException e) {
             throw new TestingValidationException("timeout waiting for condition", e);
         }

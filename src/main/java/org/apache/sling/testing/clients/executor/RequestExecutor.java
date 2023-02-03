@@ -685,6 +685,13 @@ public final class RequestExecutor {
         return new RetryHelper(retryConditionFactory.alias(alias));
     }
 
+    private VerificationHelper getVerificationHelper() {
+        final String alias = Optional.ofNullable(this.alias)
+            .orElse(getDefaultAlias());
+
+        return new VerificationHelper(verificationConditionFactory.alias(alias));
+    }
+
     private String getDefaultAlias() {
         final HttpUriRequest request = getRequest();
 
@@ -692,10 +699,6 @@ public final class RequestExecutor {
             .append(" ")
             .append(request.getURI().getPath())
             .toString();
-    }
-
-    private VerificationHelper getVerificationHelper() {
-        return new VerificationHelper(verificationConditionFactory);
     }
 
     /**
