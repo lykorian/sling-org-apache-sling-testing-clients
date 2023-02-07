@@ -39,50 +39,17 @@ public final class VerificationHelper {
     }
 
     /**
-     * Waits until a mutation is reflected. Will exit without sleeping or verifying if no mutation was performed.
-     *
-     * @param request the request to perform, return true if a mutation was made, false otherwise
-     * @param verifier the verifier to call if a mutation was made
-     */
-    public void mayRequestAndVerify(@NotNull final Callable<Boolean> request, @NotNull final Callable<Boolean> verifier)
-        throws TestingValidationException {
-        mayRequestAndVerify(null, request, verifier);
-    }
-
-    /**
-     * Waits until a mutation is reflected. Will exit without sleeping or verifying if no mutation was performed.
-     *
-     * @param request the request to perform, return true if a mutation was made, false otherwise
-     * @param verifier the verifier to call if a mutation was made
-     */
-    public void mayRequestAndVerify(final String alias, @NotNull final Callable<Boolean> request,
-        @NotNull final Callable<Boolean> verifier) throws TestingValidationException {
-        LOG.info("{}evaluating request...", getLogPrefix(alias));
-
-        boolean requestPerformed;
-
-        try {
-            requestPerformed = request.call();
-        } catch (Exception e) {
-            throw new TestingValidationException("error calling request", e);
-        }
-
-        if (requestPerformed) {
-            waitUntilReflected(alias, verifier);
-        } else {
-            LOG.debug("{}no request performed, not waiting", getLogPrefix(alias));
-        }
-    }
-
-    /**
      * Performs a mutation request, waits for a delay and verifies that the mutation is reflected.
      *
      * @param request the request to perform
      * @param verifier the verifier to ensure the mutation is reflected
+     * @param <T> response type
+     * @return response
+     * @throws TestingValidationException if error occurs during request
      */
-    public void requestAndVerify(@NotNull final Callable<?> request, @NotNull final Callable<Boolean> verifier)
+    public <T> T requestAndVerify(@NotNull final Callable<T> request, @NotNull final Callable<Boolean> verifier)
         throws TestingValidationException {
-        requestAndVerify(null, request, verifier);
+        return requestAndVerify(null, request, verifier);
     }
 
     /**
@@ -91,23 +58,30 @@ public final class VerificationHelper {
      * @param alias for logging
      * @param request the request to perform
      * @param verifier the verifier to ensure the mutation is reflected
+     * @param <T> response type
+     * @return response
+     * @throws TestingValidationException if error occurs during request
      */
-    public void requestAndVerify(final String alias, @NotNull final Callable<?> request,
+    public <T> T requestAndVerify(final String alias, @NotNull final Callable<T> request,
         @NotNull final Callable<Boolean> verifier)
         throws TestingValidationException {
         LOG.info("{}sending request...", getLogPrefix(alias));
 
+        final T response;
+
         try {
-            request.call();
+            response = request.call();
         } catch (Exception e) {
             throw new TestingValidationException("error calling request", e);
         }
 
-        waitUntilReflected(alias, verifier);
+        verify(alias, verifier);
+
+        return response;
     }
 
-    private void waitUntilReflected(final String alias, final Callable<Boolean> verifier) throws TestingValidationException {
-        LOG.info("{}waiting for request to be reflected...", getLogPrefix(alias));
+    private void verify(final String alias, final Callable<Boolean> verifier) throws TestingValidationException {
+        LOG.info("{}verifying request...", getLogPrefix(alias));
 
         try {
             conditionFactory.until(verifier);

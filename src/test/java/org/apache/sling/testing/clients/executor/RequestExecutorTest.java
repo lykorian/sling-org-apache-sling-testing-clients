@@ -17,7 +17,6 @@
 package org.apache.sling.testing.clients.executor;
 
 import java.io.IOException;
-import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -102,18 +101,6 @@ public class RequestExecutorTest {
     public void testRequestPath() throws TestingValidationException {
         final SlingHttpResponse response = new RequestExecutor(client, HttpGet.METHOD_NAME)
             .path("/test")
-            .execute();
-
-        assertEquals(HttpStatus.SC_OK, response.getStatusLine().getStatusCode());
-        assertEquals("test", response.getContent());
-    }
-
-    @Test
-    public void testRequestUri() throws TestingValidationException {
-        final URI uri = client.getUrl("/test");
-
-        final SlingHttpResponse response = new RequestExecutor(client, HttpGet.METHOD_NAME)
-            .uri(uri)
             .execute();
 
         assertEquals(HttpStatus.SC_OK, response.getStatusLine().getStatusCode());

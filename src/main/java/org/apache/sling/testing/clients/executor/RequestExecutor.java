@@ -16,7 +16,6 @@
  */
 package org.apache.sling.testing.clients.executor;
 
-import java.net.URI;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -27,6 +26,7 @@ import java.util.concurrent.Callable;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
+import org.apache.commons.lang3.StringUtils;
 import org.apache.http.Header;
 import org.apache.http.HttpEntity;
 import org.apache.http.NameValuePair;
@@ -120,6 +120,12 @@ public final class RequestExecutor {
     /** Expected HTTP response condition. */
     private Predicate<SlingHttpResponse> expectedCondition;
 
+    /** Verifier for expected JSON node. */
+    private JsonNodeVerifier jsonNodeVerifier;
+
+    /** Verification to perform after request execution. */
+    private Callable<Boolean> verifier;
+
     /** Disable request retries. */
     private boolean disableRetry;
 
@@ -131,6 +137,9 @@ public final class RequestExecutor {
 
     /** Alias for condition logging. */
     private String alias;
+
+    /** Request path. */
+    private String path;
 
     /** Built request cache. */
     private HttpUriRequest request;
@@ -154,19 +163,7 @@ public final class RequestExecutor {
      * @return this
      */
     public RequestExecutor path(@NotNull final String path) {
-        delegate.setUri(client.getUrl(path));
-
-        return this;
-    }
-
-    /**
-     * Set the request URI.
-     *
-     * @param uri absolute URI to resource
-     * @return this
-     */
-    public RequestExecutor uri(@NotNull final URI uri) {
-        delegate.setUri(uri);
+        this.path = path;
 
         return this;
     }
@@ -271,6 +268,16 @@ public final class RequestExecutor {
      */
     public RequestExecutor withExpectedCondition(final Predicate<SlingHttpResponse> expectedCondition) {
         this.expectedCondition = expectedCondition;
+
+        return this;
+    }
+
+    public RequestExecutor withExpectedJsonNode(final JsonNodeVerifier jsonNodeVerifier) {
+        return withExpectedCondition(getJsonNodeVerifierPredicate(jsonNodeVerifier));
+    }
+
+    public RequestExecutor withVerifier(@NotNull final Callable<Boolean> verifier) {
+        this.verifier = verifier;
 
         return this;
     }
@@ -491,28 +498,20 @@ public final class RequestExecutor {
     }
 
     /**
-     * Execute a request and retry until the expected HTTP response status code is returned.  Requests are retried using
-     * the configured {@link RetryHelper} for GET, HEAD, OPTIONS, and TRACE requests.
+     * Conditionally execute a request and retry until the expected HTTP response status code is returned
      *
-     * @return Sling HTTP response
+     * @param precondition only execute and verify the request if this evaluates to <code>true</code>
+     * @return optional response if request is executed
      * @throws TestingValidationException if request cannot be executed or does not meet expected conditions
      */
-    public SlingHttpResponse execute() throws TestingValidationException {
-        final HttpUriRequest request = getRequest();
-
-        SlingHttpResponse response = null;
+    public Optional<SlingHttpResponse> execute(final Callable<Boolean> precondition) throws TestingValidationException {
+        Optional<SlingHttpResponse> response = Optional.empty();
 
         try {
-            if (disableRetry) {
-                response = doRequest(request);
-
-                if (!getPredicate().test(response)) {
-                    throw new TestingValidationException("HTTP response body does not meet expected condition");
-                }
-            } else {
-                response = getRetryHelper().retryUntilCondition(() -> doRequest(request), getPredicate());
+            if (precondition.call()) {
+                response = Optional.of(execute());
             }
-        } catch (ConditionTimeoutException | ClientException e) {
+        } catch (Exception e) {
             logAndThrowException(e);
         }
 
@@ -520,36 +519,28 @@ public final class RequestExecutor {
     }
 
     /**
-     * Execute a request and retry until the expected HTTP response status code is returned, then verify the result.
+     * Execute a request and retry until the expected HTTP response status code is returned.  Requests are retried using
+     * the configured {@link RetryHelper}.
      *
-     * @param verifier verification task
+     * @return Sling HTTP response
      * @throws TestingValidationException if request cannot be executed or does not meet expected conditions
      */
-    public void executeAndVerify(@NotNull final Callable<Boolean> verifier) throws TestingValidationException {
-        try {
-            getVerificationHelper().requestAndVerify(this::execute, verifier);
-        } catch (TestingValidationException e) {
-            logAndThrowException(e);
-        }
-    }
+    public SlingHttpResponse execute() throws TestingValidationException {
+        SlingHttpResponse response = null;
 
-    /**
-     * Conditionally execute a request and retry until the expected HTTP response status code is returned, then verify
-     * the result.
-     *
-     * @param precondition only execute and verify the request if this evaluates to <code>true</code>
-     * @param verifier verification task
-     * @throws TestingValidationException if request cannot be executed or does not meet expected conditions
-     */
-    public void mayExecuteAndVerify(@NotNull final Callable<Boolean> precondition,
-        @NotNull final Callable<Boolean> verifier) throws TestingValidationException {
-        try {
-            if (precondition.call()) {
-                executeAndVerify(verifier);
+        final HttpUriRequest request = getRequest(null);
+
+        if (verifier == null) {
+            response = doExecute(request);
+        } else {
+            try {
+                response = getVerificationHelper(request).requestAndVerify(() -> doExecute(request), verifier);
+            } catch (TestingValidationException e) {
+                logAndThrowException(e);
             }
-        } catch (Exception e) {
-            logAndThrowException(e);
         }
+
+        return response;
     }
 
     /**
@@ -564,7 +555,7 @@ public final class RequestExecutor {
      * @throws TestingValidationException if request cannot be executed or does not meet expected conditions
      */
     public JsonNode getJsonNode() throws TestingIOException, TestingValidationException {
-        return getAsJsonNode(execute());
+        return getJsonNodeFromResponseBody(execute());
     }
 
     /**
@@ -586,24 +577,6 @@ public final class RequestExecutor {
     }
 
     /**
-     * Execute a request for a path returning a JSON response, retrying the request until the <code>NodeVerifier</code>
-     * returns <code>true</code>.
-     *
-     * @throws TestingIOException if the response body cannot be parsed as a JSON node
-     * @throws TestingValidationException if request cannot be executed or does not meet expected conditions
-     */
-    public JsonNode getJsonNode(final JsonNodeVerifier nodeVerifier)
-        throws TestingIOException, TestingValidationException {
-        return withExpectedCondition(response -> {
-            try {
-                return nodeVerifier.verify(getAsJsonNode(response));
-            } catch (ClientException e) {
-                return false;
-            }
-        }).getAsJsonNode(execute());
-    }
-
-    /**
      * Execute a request for a JSON node with the default depth and retry until the response matches the expected HTTP
      * status code and the node exists. Requests are retried using the configured {@link RetryHelper} for GET, HEAD,
      * OPTIONS, and TRACE requests.
@@ -617,8 +590,7 @@ public final class RequestExecutor {
 
     /**
      * Execute a request for a JSON node with the given depth and retry until the response matches the expected HTTP
-     * status code and the node exists. Requests are retried using the configured {@link RetryHelper} for GET, HEAD,
-     * OPTIONS, and TRACE requests.
+     * status code and the node exists. Requests are retried using the configured {@link RetryHelper}.
      *
      * @param depth JSON node depth
      * @return JSON node
@@ -628,11 +600,18 @@ public final class RequestExecutor {
         JsonNode jsonNode = null;
 
         try {
+            final String extension = getJsonExtension(depth);
+            final HttpUriRequest request = getRequest(extension);
+
+            final SlingHttpResponse response;
+
             if (disableRetry) {
-                jsonNode = doGetJson(depth);
+                response = doExecute(request);
             } else {
-                jsonNode = getRetryHelper().retryUntilExists(() -> doGetJson(depth));
+                response = getRetryHelper(request).retryUntilCondition(() -> doExecute(request), getPredicate());
             }
+
+            jsonNode = getJsonNodeFromResponseBody(response);
         } catch (ConditionTimeoutException | ClientException e) {
             logAndThrowException(e);
         }
@@ -640,61 +619,43 @@ public final class RequestExecutor {
         return jsonNode;
     }
 
-    /**
-     * Execute a request for a JSON node with the default depth and retry until the response matches the expected HTTP
-     * status code and the JSON node state is verified. Requests are retried using the configured {@link RetryHelper}
-     * for GET, HEAD, OPTIONS, and TRACE requests.
-     *
-     * @param nodeVerifier JSON node verifier
-     * @throws TestingValidationException if request cannot be executed or does not meet expected conditions
-     */
-    public void verifyJsonNode(@NotNull final JsonNodeVerifier nodeVerifier) throws TestingValidationException {
-        verifyJsonNode(DEFAULT_JSON_DEPTH, nodeVerifier);
-    }
+    // internals
 
-    /**
-     * Execute a request for a JSON node with the given depth and retry until the response matches the expected HTTP
-     * status code and the JSON node state is verified. Requests are retried using the configured {@link RetryHelper}
-     * for GET, HEAD, OPTIONS, and TRACE requests.
-     *
-     * @param depth JSON node depth
-     * @param nodeVerifier JSON node verifier
-     * @throws TestingValidationException if request cannot be executed or does not meet expected conditions
-     */
-    public void verifyJsonNode(final int depth, @NotNull final JsonNodeVerifier nodeVerifier)
-        throws TestingValidationException {
+    private SlingHttpResponse doExecute(final HttpUriRequest request) throws TestingValidationException {
+        SlingHttpResponse response = null;
+
         try {
             if (disableRetry) {
-                verifyJsonNode(doGetJson(depth), nodeVerifier);
-            } else {
-                final Callable<JsonNode> request = () -> doGetJson(depth);
+                response = doRequest(request);
 
-                getRetryHelper().retryUntilExceptionNotThrown(() -> verifyJsonNode(request.call(), nodeVerifier));
+                if (!getPredicate().test(response)) {
+                    throw new TestingValidationException("HTTP response body does not meet expected condition");
+                }
+            } else {
+                response = getRetryHelper(request).retryUntilCondition(() -> doRequest(request), getPredicate());
             }
         } catch (ConditionTimeoutException | ClientException e) {
             logAndThrowException(e);
         }
+
+        return response;
     }
 
-    // internals
-
-    private RetryHelper getRetryHelper() {
+    private RetryHelper getRetryHelper(final HttpUriRequest request) {
         final String alias = Optional.ofNullable(this.alias)
-            .orElse(getDefaultAlias());
+            .orElse(getDefaultAlias(request));
 
         return new RetryHelper(retryConditionFactory.alias(alias));
     }
 
-    private VerificationHelper getVerificationHelper() {
+    private VerificationHelper getVerificationHelper(final HttpUriRequest request) {
         final String alias = Optional.ofNullable(this.alias)
-            .orElse(getDefaultAlias());
+            .orElse(getDefaultAlias(request));
 
         return new VerificationHelper(verificationConditionFactory.alias(alias));
     }
 
-    private String getDefaultAlias() {
-        final HttpUriRequest request = getRequest();
-
+    private String getDefaultAlias(final HttpUriRequest request) {
         return new StringBuilder(request.getMethod())
             .append(" ")
             .append(request.getURI().getPath())
@@ -726,19 +687,11 @@ public final class RequestExecutor {
      * @param exception exception to be logged and rethrown
      */
     private void logAndThrowException(final Exception exception) throws TestingValidationException {
-        if (failureMessage != null) {
-            LOG.error(failureMessage, exception);
+        if (failureMessage == null) {
+            throw new TestingValidationException("error executing request", exception);
+        } else {
+            throw new TestingValidationException(failureMessage, exception);
         }
-
-        throw new TestingValidationException("error executing HTTP request", exception);
-    }
-
-    private String getRequestPath() {
-        return getRequest().getURI().getPath();
-    }
-
-    private JsonNode doGetJson(final int depth) throws ClientException {
-        return client.doGetJson(getRequestPath(), depth, expectedStatus);
     }
 
     private SlingHttpResponse doRequest(final HttpUriRequest request) throws ClientException {
@@ -753,9 +706,17 @@ public final class RequestExecutor {
         return response;
     }
 
-    private HttpUriRequest getRequest() {
+    /**
+     * Build the HTTP request to be executed.
+     *
+     * @param extension optional extension, may be null
+     * @return HTTP request
+     */
+    private HttpUriRequest getRequest(final String extension) {
         if (request == null) {
-            request = delegate.build();
+            request = delegate
+                .setUri(client.getUrl(path + StringUtils.trimToEmpty(extension)))
+                .build();
 
             LOG.debug("HTTP request: {}", request);
         }
@@ -764,38 +725,60 @@ public final class RequestExecutor {
     }
 
     /**
-     * Verify the state of a JSON node.
+     * Get a predicate condition for the provided JSON node verifier.
      *
-     * @param jsonNode JSON node
-     * @param nodeVerifier JSON node verifier
-     * @throws TestingValidationException if JSON node verification fails
+     * @param jsonNodeVerifier JSON node verifier
+     * @return predicate that will evaluate to true when the JSON node is verified
      */
-    private Void verifyJsonNode(final JsonNode jsonNode, @NotNull final JsonNodeVerifier nodeVerifier)
-        throws TestingValidationException {
-        if (jsonNode == null) {
-            LOG.warn("JSON node not found");
+    private Predicate<SlingHttpResponse> getJsonNodeVerifierPredicate(final JsonNodeVerifier jsonNodeVerifier) {
+        return response -> {
+            try {
+                return jsonNodeVerifier.verify(getJsonNodeFromResponseBody(response));
+            } catch (TestingIOException e) {
+                LOG.info("error getting response as JSON node: {}", e.getMessage());
 
-            throw new TestingValidationException("JSON node not found");
-        } else if (!nodeVerifier.verify(jsonNode)) {
-            LOG.warn("JSON node to verify in invalid state: {}", jsonNode);
-
-            throw new TestingValidationException("JSON node to verify in invalid state: " + jsonNode);
-        } else {
-            LOG.debug("JSON node verified, continuing...");
-        }
-
-        return null;
+                return false;
+            }
+        };
     }
 
-    private JsonNode getAsJsonNode(final SlingHttpResponse response) throws TestingIOException {
+    /**
+     * Get a JSON node from the Sling HTTP response body.
+     *
+     * @param response Sling HTTP response
+     * @return JSON node
+     * @throws TestingIOException if response body cannot be parsed as a JSON node
+     */
+    private JsonNode getJsonNodeFromResponseBody(final SlingHttpResponse response) throws TestingIOException {
         return JsonUtils.getJsonNodeFromString(response.getContent());
     }
 
+    /**
+     * Get a JSON node deserialized as the given type from the Sling HTTP response body.
+     *
+     * @param response Sling HTTP response
+     * @param type type to map JSON node
+     * @param <T> object type
+     * @return instance of type deserialized from JSON
+     * @throws TestingIOException if JSON cannot be read and/or deserialized as type
+     */
     private <T> T getJsonNodeAsType(final SlingHttpResponse response, final Class<T> type) throws TestingIOException {
         try {
             return MAPPER.readValue(response.getContent(), type);
         } catch (JsonProcessingException e) {
             throw new TestingIOException("error reading JSON node as type: " + type, e);
         }
+    }
+
+    private String getJsonExtension(final int depth) {
+        final String extension;
+
+        if (depth == -1) {
+            extension = ".infinity.json";
+        } else {
+            extension = "." + depth + ".json";
+        }
+
+        return extension;
     }
 }
