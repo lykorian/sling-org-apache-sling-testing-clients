@@ -120,11 +120,11 @@ public final class RequestExecutor {
     /** Expected HTTP response condition. */
     private Predicate<SlingHttpResponse> expectedCondition;
 
-    /** Verifier for expected JSON node. */
-    private JsonNodeVerifier jsonNodeVerifier;
-
     /** Verification to perform after request execution. */
     private Callable<Boolean> verifier;
+
+    /** Alias to use for verification requests. */
+    private String verifierAlias;
 
     /** Disable request retries. */
     private boolean disableRetry;
@@ -276,8 +276,9 @@ public final class RequestExecutor {
         return withExpectedCondition(getJsonNodeVerifierPredicate(jsonNodeVerifier));
     }
 
-    public RequestExecutor withVerifier(@NotNull final Callable<Boolean> verifier) {
+    public RequestExecutor withVerifier(@NotNull final Callable<Boolean> verifier, final String alias) {
         this.verifier = verifier;
+        this.verifierAlias = alias;
 
         return this;
     }
@@ -534,7 +535,8 @@ public final class RequestExecutor {
             response = doExecute(request);
         } else {
             try {
-                response = getVerificationHelper(request).requestAndVerify(() -> doExecute(request), verifier);
+                response = getVerificationHelper(request).requestAndVerify(verifierAlias,
+                    () -> doExecute(request), verifier);
             } catch (TestingValidationException e) {
                 logAndThrowException(e);
             }
