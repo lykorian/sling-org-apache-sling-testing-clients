@@ -22,15 +22,12 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Function;
-import java.util.function.Predicate;
 
 import org.apache.sling.testing.clients.ClientException;
 import org.apache.sling.testing.clients.executor.listener.LoggingConditionEvaluationListener;
 import org.awaitility.Awaitility;
 import org.awaitility.core.ConditionFactory;
 import org.awaitility.pollinterval.IterativePollInterval;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Builder for <code>ConditionFactory</code> instances with additional logging for each evaluation.
@@ -45,8 +42,6 @@ public final class ConditionFactoryBuilder {
     public static ConditionFactoryBuilder getInstance() {
         return new ConditionFactoryBuilder();
     }
-
-    private static final Logger LOG = LoggerFactory.getLogger(ConditionFactoryBuilder.class);
 
     /** Default initial duration for retries. */
     private static final Duration DEFAULT_INITIAL = Duration.ofSeconds(1);
@@ -181,21 +176,7 @@ public final class ConditionFactoryBuilder {
             .conditionEvaluationListener(new LoggingConditionEvaluationListener(valueToStringFunctions))
             .pollDelay(delay)
             .pollInterval(IterativePollInterval.iterative(duration -> duration.multipliedBy(multiplier), initial))
-            .ignoreExceptionsMatching(getExceptionPredicate());
-    }
-
-    private Predicate<? super Throwable> getExceptionPredicate() {
-        return exception -> {
-            final boolean retryable = Arrays.stream(retryOn).anyMatch(retryOnException -> retryOnException
-                .isAssignableFrom(exception.getClass()));
-
-            if (retryable) {
-                LOG.info("handling retryable exception: {}", exception.getClass().getName());
-            } else {
-                LOG.error("encountered non-retryable exception", exception);
-            }
-
-            return retryable;
-        };
+            .ignoreExceptionsMatching(exception -> Arrays.stream(retryOn).anyMatch(retryOnException -> retryOnException
+                .isAssignableFrom(exception.getClass())));
     }
 }

@@ -23,6 +23,7 @@ import java.util.function.Function;
 
 import org.awaitility.core.ConditionEvaluationListener;
 import org.awaitility.core.EvaluatedCondition;
+import org.awaitility.core.IgnoredException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -64,6 +65,18 @@ public final class LoggingConditionEvaluationListener implements ConditionEvalua
                 condition.getElapsedTimeInMS(),
                 condition.getRemainingTimeInMS(), getStringValue(condition.getValue(), valueToString));
         }
+    }
+
+    @Override
+    public void exceptionIgnored(final IgnoredException ignoredException) {
+        final int count = counter.incrementAndGet();
+
+        final Throwable throwable = ignoredException.getThrowable();
+
+        LOG.info("[{}] condition not satisfied after {} attempt(s), elapsed time: {}ms, remaining time: {}ms, " +
+                "ignoring exception: {}, message: {}", ignoredException.getAlias(), count,
+            ignoredException.getElapsedTimeInMS(), ignoredException.getRemainingTimeInMS(),
+            throwable.getClass().getName(), throwable.getMessage());
     }
 
     private String getStringValue(final Object conditionValue, final Function<Object, String> valueToString) {
