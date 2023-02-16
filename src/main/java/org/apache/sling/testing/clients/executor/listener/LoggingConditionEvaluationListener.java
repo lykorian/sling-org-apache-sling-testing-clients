@@ -74,9 +74,8 @@ public final class LoggingConditionEvaluationListener implements ConditionEvalua
         final Throwable throwable = ignoredException.getThrowable();
 
         LOG.info("[{}] condition not satisfied after {} attempt(s), elapsed time: {}ms, remaining time: {}ms, " +
-                "ignoring exception: {}, message: {}", ignoredException.getAlias(), count,
-            ignoredException.getElapsedTimeInMS(), ignoredException.getRemainingTimeInMS(),
-            throwable.getClass().getName(), throwable.getMessage());
+                "ignoring exception: {}", ignoredException.getAlias(), count, ignoredException.getElapsedTimeInMS(),
+            ignoredException.getRemainingTimeInMS(), throwable.getClass().getName());
     }
 
     private String getStringValue(final Object conditionValue, final Function<Object, String> valueToString) {

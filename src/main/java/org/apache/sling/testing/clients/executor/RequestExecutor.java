@@ -700,9 +700,9 @@ public final class RequestExecutor {
         final SlingHttpResponse response;
 
         if (stream) {
-            response = client.doStreamRequest(request, null, expectedStatus);
+            response = client.doStreamRequest(request, null);
         } else {
-            response = client.doRequest(request, null, expectedStatus);
+            response = client.doRequest(request, null);
         }
 
         return response;
