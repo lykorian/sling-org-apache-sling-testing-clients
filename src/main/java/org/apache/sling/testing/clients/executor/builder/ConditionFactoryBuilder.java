@@ -79,11 +79,13 @@ public final class ConditionFactoryBuilder {
     /**
      * Set the alias to use for condition logging.
      *
-     * @param alias alias
+     * @param format String to be formatted
+     * @param args arguments referenced in format
      * @return this
+     * @see String#format(String, Object...)
      */
-    public ConditionFactoryBuilder withAlias(final String alias) {
-        this.alias = alias;
+    public ConditionFactoryBuilder withAlias(final String format, final Object... args) {
+        this.alias = String.format(format, args);
 
         return this;
     }

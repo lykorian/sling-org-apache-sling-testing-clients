@@ -272,13 +272,32 @@ public final class RequestExecutor {
         return this;
     }
 
+    /**
+     * Set an expected JSON node state for the HTTP response.  An exception will be thrown if the response body JSON
+     * verification fails.
+     *
+     * @param jsonNodeVerifier JSON node verifier
+     * @return this
+     * @see org.apache.sling.testing.clients.executor.verifier.JsonNodeVerifiers
+     */
     public RequestExecutor withExpectedJsonNode(final JsonNodeVerifier jsonNodeVerifier) {
         return withExpectedCondition(getJsonNodeVerifierPredicate(jsonNodeVerifier));
     }
 
-    public RequestExecutor withVerifier(@NotNull final Callable<Boolean> verifier, final String alias) {
+    /**
+     * Set a verifier function to be called after the request is executed.  The verifier will be retried using the
+     * enclosed {@link VerificationHelper}.
+     *
+     * @param verifier verifier callable to return true if post-request state is verified
+     * @param alias alias for verification requests
+     * @param aliasArgs arguments referenced in alias (optional)
+     * @return this
+     * @see String#format(String, Object...)
+     */
+    public RequestExecutor withVerifier(@NotNull final Callable<Boolean> verifier, final String alias,
+        final Object... aliasArgs) {
         this.verifier = verifier;
-        this.verifierAlias = alias;
+        this.verifierAlias = String.format(alias, aliasArgs);
 
         return this;
     }
@@ -477,11 +496,13 @@ public final class RequestExecutor {
     /**
      * Set an alias to use for condition logging.
      *
-     * @param alias alias
+     * @param alias String to be formatted
+     * @param aliasArgs arguments referenced in format
      * @return this
+     * @see String#format(String, Object...)
      */
-    public RequestExecutor withAlias(@NotNull final String alias) {
-        this.alias = alias;
+    public RequestExecutor withAlias(@NotNull final String alias, final Object... aliasArgs) {
+        this.alias = String.format(alias, aliasArgs);
 
         return this;
     }
@@ -489,11 +510,14 @@ public final class RequestExecutor {
     /**
      * Descriptive failure message to log if request execution fails due to timeout or client exception.
      *
-     * @param failureMessage failure message
+     * @param failureMessage String to be formatted
+     * @param failureMessageArgs arguments referenced in format
      * @return this
+     * @see String#format(String, Object...)
      */
-    public RequestExecutor withFailureMessage(@NotNull final String failureMessage) {
-        this.failureMessage = failureMessage;
+    public RequestExecutor withFailureMessage(@NotNull final String failureMessage,
+        final Object... failureMessageArgs) {
+        this.failureMessage = String.format(failureMessage, failureMessageArgs);
 
         return this;
     }
@@ -735,7 +759,11 @@ public final class RequestExecutor {
     private Predicate<SlingHttpResponse> getJsonNodeVerifierPredicate(final JsonNodeVerifier jsonNodeVerifier) {
         return response -> {
             try {
-                return jsonNodeVerifier.verify(getJsonNodeFromResponseBody(response));
+                final JsonNode jsonNode = getJsonNodeFromResponseBody(response);
+
+                LOG.info("verifying JSON node: {}", jsonNode);
+
+                return jsonNodeVerifier.verify(jsonNode);
             } catch (TestingIOException e) {
                 LOG.info("error getting response as JSON node: {}", e.getMessage());
 
