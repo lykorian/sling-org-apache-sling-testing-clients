@@ -559,8 +559,8 @@ public final class RequestExecutor {
             response = doExecute(request);
         } else {
             try {
-                response = getVerificationHelper(request).requestAndVerify(verifierAlias,
-                    () -> doExecute(request), verifier);
+                response = getVerificationHelper(request).requestAndVerify(() -> doExecute(request), verifier,
+                    verifierAlias);
             } catch (TestingValidationException e) {
                 logAndThrowException(e);
             }

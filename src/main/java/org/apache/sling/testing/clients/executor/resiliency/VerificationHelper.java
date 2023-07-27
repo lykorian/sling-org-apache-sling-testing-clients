@@ -49,23 +49,24 @@ public final class VerificationHelper {
      */
     public <T> T requestAndVerify(@NotNull final Callable<T> request, @NotNull final Callable<Boolean> verifier)
         throws TestingValidationException {
-        return requestAndVerify(null, request, verifier);
+        return requestAndVerify(request, verifier, null);
     }
 
     /**
      * Performs a mutation request, waits for a delay and verifies that the mutation is reflected.
      *
-     * @param alias for logging
      * @param request the request to perform
      * @param verifier the verifier to ensure the mutation is reflected
+     * @param alias for logging
+     * @param aliasArgs arguments referenced in alias (optional)
      * @param <T> response type
      * @return response
      * @throws TestingValidationException if error occurs during request
      */
-    public <T> T requestAndVerify(final String alias, @NotNull final Callable<T> request,
-        @NotNull final Callable<Boolean> verifier)
+    public <T> T requestAndVerify(@NotNull final Callable<T> request, @NotNull final Callable<Boolean> verifier,
+        final String alias, final Object... aliasArgs)
         throws TestingValidationException {
-        LOG.info("{}sending request...", getLogPrefix(alias));
+        LOG.info("{}sending request...", getLogPrefix(alias, aliasArgs));
 
         final T response;
 
@@ -75,13 +76,14 @@ public final class VerificationHelper {
             throw new TestingValidationException("error calling request", e);
         }
 
-        verify(alias, verifier);
+        verify(verifier, alias);
 
         return response;
     }
 
-    private void verify(final String alias, final Callable<Boolean> verifier) throws TestingValidationException {
-        LOG.info("{}verifying request...", getLogPrefix(alias));
+    private void verify(final Callable<Boolean> verifier, final String alias, final Object... aliasArgs)
+        throws TestingValidationException {
+        LOG.info("{}verifying request...", getLogPrefix(alias, aliasArgs));
 
         try {
             conditionFactory.until(verifier);
@@ -90,7 +92,7 @@ public final class VerificationHelper {
         }
     }
 
-    private String getLogPrefix(final String alias) {
-        return alias == null ? "" : "[" + alias + "] ";
+    private String getLogPrefix(final String alias, final Object... aliasArgs) {
+        return alias == null ? "" : "[" + String.format(alias, aliasArgs) + "] ";
     }
 }
