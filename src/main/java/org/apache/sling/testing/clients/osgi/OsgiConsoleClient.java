@@ -17,15 +17,19 @@
 
 package org.apache.sling.testing.clients.osgi;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.http.Header;
 import org.apache.http.entity.mime.MultipartEntityBuilder;
 import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.message.BasicNameValuePair;
 import org.apache.sling.testing.clients.ClientException;
 import org.apache.sling.testing.clients.SlingClient;
 import org.apache.sling.testing.clients.SlingClientConfig;
 import org.apache.sling.testing.clients.SlingHttpResponse;
 import org.apache.sling.testing.clients.exceptions.TestingIOException;
+import org.apache.sling.testing.clients.exceptions.TestingSetupException;
 import org.apache.sling.testing.clients.exceptions.TestingValidationException;
 import org.apache.sling.testing.clients.util.FormEntityBuilder;
 import org.apache.sling.testing.clients.util.HttpUtils;
@@ -42,6 +46,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -96,7 +101,7 @@ public class OsgiConsoleClient extends SlingClient {
      * Default constructor. Simply calls {@link SlingClient#SlingClient(URI, String, String)}
      *
      * @param serverUrl the URL to the server under test
-     * @param userName the user name used for authentication
+     * @param userName the username used for authentication
      * @param password the password for this user
      * @throws ClientException if the client cannot be instantiated
      */
@@ -173,7 +178,7 @@ public class OsgiConsoleClient extends SlingClient {
     /**
      * Returns the wrapper for the component info json
      *
-     * @param id the id of the component
+     * @param name the name of the component
      * @return the component info or {@code null} if the component with that name is not found
      */
     private ComponentInfo getComponentInfo(String name) throws ClientException {
@@ -187,7 +192,7 @@ public class OsgiConsoleClient extends SlingClient {
     /**
      * Returns the service info wrapper for all services implementing the given type.
      *
-     * @param name the type of the service
+     * @param type the name of the service
      * @return the service infos or {@code null} if no service for the given type is registered
      */
     private Collection<ServiceInfo> getServiceInfos(String type) throws ClientException {
@@ -442,7 +447,7 @@ public class OsgiConsoleClient extends SlingClient {
             builder.addParameter("factoryPid", factoryPID);
         }
         // add properties to edit
-        StringBuilder propertyList = new StringBuilder("");
+        StringBuilder propertyList = new StringBuilder();
         for (String propName : configProperties.keySet()) {
             Object o = configProperties.get(propName);
             if (o instanceof String) {
@@ -462,7 +467,7 @@ public class OsgiConsoleClient extends SlingClient {
         HttpUtils.verifyHttpStatus(resp, HttpUtils.getExpectedStatus(SC_MOVED_TEMPORARILY, expectedStatus));
 
         Header[] locationHeader = resp.getHeaders("Location");
-        if (locationHeader!=null && locationHeader.length==1) {
+        if ((locationHeader != null) && (locationHeader.length == 1)) {
             // The location header can contain a relative or an absolute URL
             // Gathering where the URL_CONFIGURATION substring starts will allow adapting to both cases
             int urlPathStart = locationHeader[0].getValue().indexOf(URL_CONFIGURATION);
@@ -851,7 +856,6 @@ public class OsgiConsoleClient extends SlingClient {
 
     /**
      * Returns a data structure like:
-     *
      * {
      *   "status" : "Bundle information: 173 bundles in total - all 173 bundles active.",
      *   "s" : [173,171,2,0,0],
@@ -887,6 +891,41 @@ public class OsgiConsoleClient extends SlingClient {
         }
 
         return bundle;
+    }
+
+    /**
+     * Performs a search of a config PID through the service information.
+     * <p>
+     * This is useful for the case where:
+     * <ul>
+     *     <li>We don't have the exact config PID (common if it is a factory config we didn't create).</li>
+     *     <li>We have to search the config with a property having a defined value</li>
+     * </ul>
+     *
+     *
+     * @param serviceType   The type of service.
+     * @param propertyName  The name of the property with the unique value to search.
+     * @param propertyValue The unique value to be searched.
+     * @return The final config PID. Null if it is not found.*
+     */
+    public String getConfigPIDFromServices(String serviceType, String propertyName, String propertyValue, final long timeout, final long delay) throws ClientException, InterruptedException, TimeoutException {
+
+        ConfigurationPollerByFilter p = new ConfigurationPollerByFilter(String.format("(service.pid=%s.*)", serviceType));
+
+        p.poll(timeout, delay);
+        JsonNode jn;
+        try {
+            jn = new ObjectMapper().readTree(p.getConfigAsString());
+        } catch (JsonProcessingException e) {
+            throw new TestingSetupException("Error reading configurations", e);
+        }
+
+        for (JsonNode configuration: jn) {
+            if (configuration.path("properties").path(propertyName).path("value").asText().equals(propertyValue)) {
+                return configuration.get("pid").asText();
+            }
+        }
+        return null;
     }
 
     //
@@ -959,5 +998,33 @@ public class OsgiConsoleClient extends SlingClient {
         public Map<String, Object> getConfig() {
             return config;
         }
+    }
+
+    class ConfigurationPollerByFilter extends Polling {
+        private String configAsString;
+        private String filter;
+
+        public ConfigurationPollerByFilter(String filter) {
+            this.filter = filter;
+        }
+        public String getConfigAsString() {
+            return configAsString;
+        }
+        @Override
+        public Boolean call()  {
+            try {
+                SlingHttpResponse resp = doGet("/system/console/configMgr/*.json",
+                        Collections.singletonList(
+                                new BasicNameValuePair("pidFilter", filter)
+                        )
+                );
+                this.configAsString = resp.getContent();
+                return true;
+            } catch (Exception e) {
+                LOG.debug("Retrying doGet(/system/console/configMgr/*.json). Exception: "+e.getMessage(),e);
+                return false;
+            }
+        }
+
     }
 }
